@@ -88,6 +88,10 @@ output/
 intermediates/
 *.log
 
+# Exception: test fixtures (small files for CI)
+!tests/fixtures/*.wav
+!tests/fixtures/*.MP4
+
 # Jupyter
 .ipynb_checkpoints/
 
