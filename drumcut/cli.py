@@ -183,12 +183,74 @@ def segment(
     output: Annotated[Path, typer.Option("--output", "-o", help="Output directory")] = Path("./segments"),
     min_duration: Annotated[int, typer.Option(help="Minimum segment duration in seconds")] = 30,
     padding: Annotated[float, typer.Option(help="Padding around segments in seconds")] = 3.0,
+    dry_run: Annotated[bool, typer.Option(help="Show detected segments without extracting")] = False,
 ) -> None:
     """Segment video based on MIDI track energy."""
+    from drumcut.audio.io import detect_track_roles, load_audio
+    from drumcut.segmentation.detect import detect_activity_regions
+    from drumcut.segmentation.slice import extract_segments
+
     console.print(f"[bold blue]Segmenting:[/] {video_file}")
 
-    # TODO: Implement segmentation
-    console.print("[red]Segmentation not yet implemented[/]")
+    # Find MIDI track
+    if midi_track is None:
+        if audio_dir is None:
+            console.print("[red]Must provide --midi-track or --audio-dir[/]")
+            raise typer.Exit(1)
+
+        audio_files = list(audio_dir.glob("*.wav")) + list(audio_dir.glob("*.WAV"))
+        roles = detect_track_roles(audio_files)
+
+        if "midi" not in roles:
+            console.print("[red]No MIDI track found in audio directory[/]")
+            raise typer.Exit(1)
+
+        midi_track = roles["midi"]
+
+    console.print(f"[bold blue]MIDI track:[/] {midi_track}")
+
+    # Load and analyze
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Analyzing audio energy...", total=None)
+        audio, sr = load_audio(midi_track)
+        segments = detect_activity_regions(
+            audio, sr,
+            min_duration=min_duration,
+            padding=padding,
+        )
+
+    if not segments:
+        console.print("[yellow]No segments detected[/]")
+        raise typer.Exit(0)
+
+    console.print(f"\n[green]Found {len(segments)} segment(s):[/]")
+    for i, seg in enumerate(segments, 1):
+        mins, secs = divmod(seg.start_seconds, 60)
+        end_mins, end_secs = divmod(seg.end_seconds, 60)
+        console.print(
+            f"  {i}. [{int(mins):02d}:{secs:05.2f} → {int(end_mins):02d}:{end_secs:05.2f}] "
+            f"({seg.duration_seconds:.1f}s)"
+        )
+
+    if dry_run:
+        console.print("\n[yellow]Dry run - no segments extracted[/]")
+        return
+
+    # Extract segments
+    console.print(f"\n[bold blue]Extracting to:[/] {output}")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Extracting segments...", total=None)
+        output_paths = extract_segments(video_file, segments, output)
+
+    console.print(f"[green]Extracted {len(output_paths)} segment(s)[/]")
 
 
 @app.command()
