@@ -1,5 +1,7 @@
 """Activity detection using MIDI track energy analysis."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 import librosa

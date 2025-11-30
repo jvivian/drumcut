@@ -1,5 +1,7 @@
 """Audio-video synchronization."""
 
+from __future__ import annotations
+
 import subprocess
 import tempfile
 from pathlib import Path

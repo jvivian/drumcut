@@ -1,5 +1,7 @@
 """Similarity computation using DTW."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import librosa

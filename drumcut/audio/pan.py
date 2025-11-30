@@ -1,5 +1,7 @@
 """Stereo panning utilities."""
 
+from __future__ import annotations
+
 import numpy as np
 
 from drumcut.audio.io import ensure_mono

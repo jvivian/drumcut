@@ -1,5 +1,7 @@
 """Audio feature extraction for similarity comparison."""
 
+from __future__ import annotations
+
 import hashlib
 import pickle
 from pathlib import Path

@@ -1,5 +1,7 @@
 """Clustering algorithms for grouping similar segments."""
 
+from __future__ import annotations
+
 import numpy as np
 
 

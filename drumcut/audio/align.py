@@ -1,5 +1,7 @@
 """Audio alignment using cross-correlation."""
 
+from __future__ import annotations
+
 import numpy as np
 from scipy.signal import correlate
 
