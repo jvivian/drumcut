@@ -57,20 +57,28 @@ def mix_session(
     left_pan: float = -0.5,
     right_pan: float = 0.5,
     target_lufs: float = -14.0,
+    verbose: bool = False,
 ) -> dict[str, object]:
     """
     Mix a session's audio tracks (Left, Right, MIDI).
 
+    Handles both mono and stereo input tracks:
+    - Mono tracks are panned to the specified position
+    - Stereo tracks are kept as-is (or width-adjusted)
+
     Args:
         session_folder: Path to folder containing audio files.
         output_path: Output path for mixed audio.
-        left_pan: Pan position for left track.
-        right_pan: Pan position for right track.
+        left_pan: Pan position for left track (-1 to 1).
+        right_pan: Pan position for right track (-1 to 1).
         target_lufs: Target loudness for final mix.
+        verbose: Print progress info.
 
     Returns:
         Dict with mixing metadata.
     """
+    from drumcut.audio.io import ensure_mono
+
     session_folder = Path(session_folder)
     output_path = Path(output_path)
 
@@ -80,6 +88,9 @@ def mix_session(
 
     if not roles:
         raise ValueError(f"No audio files found in {session_folder}")
+
+    if verbose:
+        print(f"Found tracks: {list(roles.keys())}")
 
     # Load tracks
     tracks_data = {}
@@ -93,44 +104,83 @@ def mix_session(
             from drumcut.audio.io import resample_if_needed
             audio, _ = resample_if_needed(audio, track_sr, sr)
         tracks_data[role] = audio
+        if verbose:
+            shape = "stereo" if audio.ndim == 2 else "mono"
+            print(f"  {role}: {path.name} ({shape}, {len(audio)/sr:.1f}s)")
 
-    # Align tracks using MIDI as reference
-    if "midi" in tracks_data:
-        reference = tracks_data["midi"]
+    # Align tracks using MIDI as reference (use mono for correlation)
+    offsets_info = {}
+    if "midi" in tracks_data and len(tracks_data) > 1:
+        reference = ensure_mono(tracks_data["midi"])
         other_roles = [r for r in ["left", "right"] if r in tracks_data]
-        other_tracks = [tracks_data[r] for r in other_roles]
 
-        aligned, offsets = align_tracks(reference, other_tracks, sr)
+        if other_roles:
+            other_tracks_mono = [ensure_mono(tracks_data[r]) for r in other_roles]
+            aligned_mono, offsets = align_tracks(reference, other_tracks_mono, sr)
 
-        for role, track in zip(other_roles, aligned):
-            tracks_data[role] = track
+            # Apply same offset to original (possibly stereo) tracks
+            for role, offset in zip(other_roles, offsets):
+                offsets_info[role] = offset / sr
+                if verbose:
+                    print(f"  Alignment offset for {role}: {offset/sr*1000:.1f}ms")
 
-    # Pan tracks
-    panned_tracks = []
+                original = tracks_data[role]
+                if offset > 0:
+                    # Pad start
+                    if original.ndim == 2:
+                        padding = np.zeros((offset, original.shape[1]))
+                    else:
+                        padding = np.zeros(offset)
+                    tracks_data[role] = np.concatenate([padding, original])
+                elif offset < 0:
+                    # Trim start
+                    tracks_data[role] = original[-offset:]
 
-    if "left" in tracks_data:
-        panned_tracks.append(pan_mono_to_stereo(tracks_data["left"], left_pan))
+    # Process and pan tracks
+    processed_tracks = []
 
-    if "right" in tracks_data:
-        panned_tracks.append(pan_mono_to_stereo(tracks_data["right"], right_pan))
+    for role in ["left", "right", "midi"]:
+        if role not in tracks_data:
+            continue
 
-    if "midi" in tracks_data:
-        panned_tracks.append(ensure_stereo(tracks_data["midi"]))
+        track = tracks_data[role]
+
+        if track.ndim == 1:
+            # Mono track - pan it
+            if role == "left":
+                processed = pan_mono_to_stereo(track, left_pan)
+            elif role == "right":
+                processed = pan_mono_to_stereo(track, right_pan)
+            else:  # midi
+                processed = pan_mono_to_stereo(track, 0.0)  # Center
+        else:
+            # Stereo track - use as-is (already has stereo positioning)
+            processed = track
+
+        processed_tracks.append(processed)
 
     # Mix
-    mixed = mix_tracks(panned_tracks)
+    if verbose:
+        print("Mixing tracks...")
+    mixed = mix_tracks(processed_tracks)
 
     # Normalize
-    # Save temp, normalize, then overwrite
+    if verbose:
+        print("Normalizing...")
     temp_path = output_path.with_suffix(".tmp.wav")
     save_audio(temp_path, mixed, sr)
 
-    from drumcut.audio.normalize import normalize_audio
     result = normalize_audio(temp_path, output_path, target_lufs)
     temp_path.unlink()
+
+    if verbose:
+        print(f"Output: {output_path}")
+        print(f"  LUFS: {result['output_lufs']:.1f}")
+        print(f"  True peak: {result['true_peak_dbtp']:.1f} dBTP")
 
     return {
         "tracks": list(roles.keys()),
         "sample_rate": sr,
+        "offsets": offsets_info,
         "normalization": result,
     }
