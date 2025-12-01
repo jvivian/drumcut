@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 
 from drumcut.audio.align import align_tracks
-from drumcut.audio.io import detect_track_roles, ensure_stereo, load_audio, save_audio
-from drumcut.audio.normalize import measure_loudness, normalize_audio
+from drumcut.audio.io import detect_track_roles, load_audio, save_audio
+from drumcut.audio.normalize import normalize_audio
 from drumcut.audio.pan import pan_mono_to_stereo
 
 
@@ -48,7 +48,7 @@ def mix_tracks(
         padded.append(track)
 
     # Mix with gains
-    mixed = sum(t * g for t, g in zip(padded, gains))
+    mixed = sum(t * g for t, g in zip(padded, gains, strict=True))
 
     return mixed
 
@@ -104,11 +104,12 @@ def mix_session(
             sr = track_sr
         elif sr != track_sr:
             from drumcut.audio.io import resample_if_needed
+
             audio, _ = resample_if_needed(audio, track_sr, sr)
         tracks_data[role] = audio
         if verbose:
             shape = "stereo" if audio.ndim == 2 else "mono"
-            print(f"  {role}: {path.name} ({shape}, {len(audio)/sr:.1f}s)")
+            print(f"  {role}: {path.name} ({shape}, {len(audio) / sr:.1f}s)")
 
     # Align tracks using MIDI as reference (use mono for correlation)
     offsets_info = {}
@@ -121,10 +122,10 @@ def mix_session(
             aligned_mono, offsets = align_tracks(reference, other_tracks_mono, sr)
 
             # Apply same offset to original (possibly stereo) tracks
-            for role, offset in zip(other_roles, offsets):
+            for role, offset in zip(other_roles, offsets, strict=True):
                 offsets_info[role] = offset / sr
                 if verbose:
-                    print(f"  Alignment offset for {role}: {offset/sr*1000:.1f}ms")
+                    print(f"  Alignment offset for {role}: {offset / sr * 1000:.1f}ms")
 
                 original = tracks_data[role]
                 if offset > 0:

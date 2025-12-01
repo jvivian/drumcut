@@ -164,9 +164,7 @@ class TestNormalization:
         # Our test tone has amplitude 0.5, so peak should be around -6 dB
         assert -10 < peak < 0
 
-    def test_normalize_quiet_audio(
-        self, test_quiet_path: Path, tmp_audio_dir: Path
-    ) -> None:
+    def test_normalize_quiet_audio(self, test_quiet_path: Path, tmp_audio_dir: Path) -> None:
         """Test normalizing quiet audio boosts it to target."""
         output_path = tmp_audio_dir / "normalized.wav"
         result = normalize_audio(test_quiet_path, output_path, target_lufs=-14.0)
@@ -179,9 +177,7 @@ class TestNormalization:
         output_lufs = measure_loudness(normalized, sr)
         assert abs(output_lufs - (-14.0)) < 1.0  # Within 1 LUFS of target
 
-    def test_normalize_respects_true_peak(
-        self, test_loud_path: Path, tmp_audio_dir: Path
-    ) -> None:
+    def test_normalize_respects_true_peak(self, test_loud_path: Path, tmp_audio_dir: Path) -> None:
         """Test that normalization doesn't exceed true peak limit."""
         output_path = tmp_audio_dir / "normalized.wav"
         result = normalize_audio(

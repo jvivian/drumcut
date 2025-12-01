@@ -54,10 +54,7 @@ def compute_distance_matrix(
     # Extract features
     if cache_dir:
         cache = FeatureCache(cache_dir)
-        chromas = [
-            cache.get_or_compute(p, "chroma", extract_chroma)
-            for p in audio_paths
-        ]
+        chromas = [cache.get_or_compute(p, "chroma", extract_chroma) for p in audio_paths]
     else:
         chromas = [extract_chroma(p) for p in audio_paths]
 

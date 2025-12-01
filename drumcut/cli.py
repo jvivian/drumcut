@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -19,9 +19,15 @@ console = Console()
 
 @app.command()
 def process(
-    session_folder: Annotated[Path, typer.Argument(help="Path to session folder with audio/video files")],
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output directory")] = Path("./processed"),
-    filter_preset: Annotated[str, typer.Option("--filter", "-f", help="Video filter preset")] = "death-metal",
+    session_folder: Annotated[
+        Path, typer.Argument(help="Path to session folder with audio/video files")
+    ],
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output directory")] = Path(
+        "./processed"
+    ),
+    filter_preset: Annotated[
+        str, typer.Option("--filter", "-f", help="Video filter preset")
+    ] = "death-metal",
     min_duration: Annotated[int, typer.Option(help="Minimum song duration in seconds")] = 30,
     padding: Annotated[float, typer.Option(help="Padding around segments in seconds")] = 3.0,
     keep_intermediates: Annotated[bool, typer.Option(help="Keep intermediate files")] = False,
@@ -43,7 +49,9 @@ def process(
 @app.command()
 def normalize(
     audio_file: Annotated[Path, typer.Argument(help="Audio file to normalize")],
-    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output file path")] = None,
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Output file path")
+    ] = None,
     target_lufs: Annotated[float, typer.Option(help="Target loudness in LUFS")] = -14.0,
     true_peak: Annotated[float, typer.Option(help="True peak ceiling in dBTP")] = -1.0,
 ) -> None:
@@ -65,7 +73,9 @@ def normalize(
 @app.command()
 def mix(
     session_folder: Annotated[Path, typer.Argument(help="Session folder with audio files")],
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path("./mixed.wav"),
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path(
+        "./mixed.wav"
+    ),
     left_pan: Annotated[float, typer.Option(help="Left track pan position (-1 to 1)")] = -0.5,
     right_pan: Annotated[float, typer.Option(help="Right track pan position (-1 to 1)")] = 0.5,
     target_lufs: Annotated[float, typer.Option(help="Target loudness in LUFS")] = -14.0,
@@ -84,9 +94,12 @@ def mix(
     ) as progress:
         progress.add_task("Mixing audio tracks...", total=None)
         result = mix_session(
-            session_folder, output,
-            left_pan=left_pan, right_pan=right_pan,
-            target_lufs=target_lufs, verbose=False
+            session_folder,
+            output,
+            left_pan=left_pan,
+            right_pan=right_pan,
+            target_lufs=target_lufs,
+            verbose=False,
         )
 
     console.print(f"[green]Saved to:[/] {output}")
@@ -98,9 +111,15 @@ def mix(
 @app.command("merge-video")
 def merge_video(
     session_folder: Annotated[Path, typer.Argument(help="Session folder with GoPro files")],
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path("./merged.mp4"),
-    overlap: Annotated[str, typer.Option(help="Overlap handling: 'auto' or seconds to trim")] = "auto",
-    session_id: Annotated[Optional[int], typer.Option(help="Specific session ID to merge (optional)")] = None,
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path(
+        "./merged.mp4"
+    ),
+    overlap: Annotated[
+        str, typer.Option(help="Overlap handling: 'auto' or seconds to trim")
+    ] = "auto",
+    session_id: Annotated[
+        int | None, typer.Option(help="Specific session ID to merge (optional)")
+    ] = None,
 ) -> None:
     """Merge GoPro video chapters into a single file."""
     from drumcut.video.gopro import find_gopro_files, group_by_session
@@ -142,7 +161,7 @@ def merge_video(
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Merging video chapters...", total=None)
+        progress.add_task("Merging video chapters...", total=None)
         result = merge_chapters(selected_files, output, overlap_trim=overlap_trim, verbose=True)
 
     output_size = result.stat().st_size / 1024 / 1024 / 1024
@@ -154,7 +173,9 @@ def merge_video(
 def sync(
     video_file: Annotated[Path, typer.Argument(help="Video file")],
     audio_file: Annotated[Path, typer.Argument(help="Audio file to sync")],
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path("./synced.mp4"),
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path(
+        "./synced.mp4"
+    ),
 ) -> None:
     """Sync external audio to video using cross-correlation."""
     from drumcut.video.sync import sync_audio_to_video
@@ -178,12 +199,20 @@ def sync(
 @app.command()
 def segment(
     video_file: Annotated[Path, typer.Argument(help="Video file to segment")],
-    midi_track: Annotated[Optional[Path], typer.Option(help="MIDI/drums track for energy detection")] = None,
-    audio_dir: Annotated[Optional[Path], typer.Option(help="Directory to auto-detect MIDI track")] = None,
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output directory")] = Path("./segments"),
+    midi_track: Annotated[
+        Path | None, typer.Option(help="MIDI/drums track for energy detection")
+    ] = None,
+    audio_dir: Annotated[
+        Path | None, typer.Option(help="Directory to auto-detect MIDI track")
+    ] = None,
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output directory")] = Path(
+        "./segments"
+    ),
     min_duration: Annotated[int, typer.Option(help="Minimum segment duration in seconds")] = 30,
     padding: Annotated[float, typer.Option(help="Padding around segments in seconds")] = 3.0,
-    dry_run: Annotated[bool, typer.Option(help="Show detected segments without extracting")] = False,
+    dry_run: Annotated[
+        bool, typer.Option(help="Show detected segments without extracting")
+    ] = False,
 ) -> None:
     """Segment video based on MIDI track energy."""
     from drumcut.audio.io import detect_track_roles, load_audio
@@ -218,7 +247,8 @@ def segment(
         progress.add_task("Analyzing audio energy...", total=None)
         audio, sr = load_audio(midi_track)
         segments = detect_activity_regions(
-            audio, sr,
+            audio,
+            sr,
             min_duration=min_duration,
             padding=padding,
         )
@@ -256,8 +286,12 @@ def segment(
 @app.command()
 def group(
     segments_dir: Annotated[Path, typer.Argument(help="Directory containing segments")],
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output directory")] = Path("./grouped"),
-    threshold: Annotated[Optional[float], typer.Option(help="Similarity threshold (auto if not set)")] = None,
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output directory")] = Path(
+        "./grouped"
+    ),
+    threshold: Annotated[
+        float | None, typer.Option(help="Similarity threshold (auto if not set)")
+    ] = None,
     dry_run: Annotated[bool, typer.Option(help="Show groupings without copying files")] = False,
 ) -> None:
     """Group similar segments by audio fingerprinting."""
@@ -270,9 +304,7 @@ def group(
     console.print(f"[bold blue]Grouping segments from:[/] {segments_dir}")
 
     # Find video segments
-    segment_paths = sorted(
-        list(segments_dir.glob("*.mp4")) + list(segments_dir.glob("*.MP4"))
-    )
+    segment_paths = sorted(list(segments_dir.glob("*.mp4")) + list(segments_dir.glob("*.MP4")))
 
     if not segment_paths:
         console.print("[red]No video segments found[/]")
@@ -297,13 +329,22 @@ def group(
             for seg_path in segment_paths:
                 audio_path = tmpdir / f"{seg_path.stem}.wav"
                 cmd = [
-                    "ffmpeg", "-y", "-i", str(seg_path),
-                    "-vn", "-ac", "1", "-ar", "22050",
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(seg_path),
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "22050",
                     str(audio_path),
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode != 0:
-                    console.print(f"[yellow]Warning: Failed to extract audio from {seg_path.name}[/]")
+                    console.print(
+                        f"[yellow]Warning: Failed to extract audio from {seg_path.name}[/]"
+                    )
                     continue
                 audio_paths.append(audio_path)
                 progress.advance(task)
@@ -337,7 +378,7 @@ def group(
 
         # Organize output
         console.print(f"\n[bold blue]Organizing output to:[/] {output}")
-        manifest = organize_output(segment_paths, groups, output)
+        organize_output(segment_paths, groups, output)
 
         console.print(f"[green]Created {len(groups)} group folder(s)[/]")
 
@@ -346,6 +387,7 @@ def group(
 def version() -> None:
     """Show version information."""
     from drumcut import __version__
+
     console.print(f"drumcut version {__version__}")
 
 

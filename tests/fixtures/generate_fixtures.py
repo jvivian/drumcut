@@ -34,7 +34,7 @@ def generate_drum_pattern(duration: float, sr: int) -> np.ndarray:
         decay_len = min(int(sr * 0.1), samples - i)
         t = np.arange(decay_len) / sr
         kick = 0.8 * np.exp(-t * 30) * np.sin(2 * np.pi * 60 * t)
-        audio[i:i + decay_len] += kick.astype(np.float32)
+        audio[i : i + decay_len] += kick.astype(np.float32)
 
     # Add some noise bursts (snare-like)
     snare_interval = int(sr * 1.0)
@@ -42,7 +42,7 @@ def generate_drum_pattern(duration: float, sr: int) -> np.ndarray:
         decay_len = min(int(sr * 0.05), samples - i)
         t = np.arange(decay_len) / sr
         snare = 0.5 * np.exp(-t * 50) * np.random.randn(decay_len)
-        audio[i:i + decay_len] += snare.astype(np.float32)
+        audio[i : i + decay_len] += snare.astype(np.float32)
 
     return np.clip(audio, -1, 1)
 
@@ -91,28 +91,28 @@ def create_audio_fixtures():
     # Left channel - music pattern panned slightly
     music_l = generate_music_pattern(DURATION_SECONDS, SAMPLE_RATE)
     sf.write(FIXTURES_DIR / "2024-01-01-STL.wav", music_l, SAMPLE_RATE)
-    print(f"  Created 2024-01-01-STL.wav")
+    print("  Created 2024-01-01-STL.wav")
 
     # Right channel - same pattern with slight delay (simulates real recording)
     delay_samples = int(0.002 * SAMPLE_RATE)  # 2ms delay
     music_r = np.roll(music_l, delay_samples)
     sf.write(FIXTURES_DIR / "2024-01-01-STR.wav", music_r, SAMPLE_RATE)
-    print(f"  Created 2024-01-01-STR.wav")
+    print("  Created 2024-01-01-STR.wav")
 
     # MIDI/Drums track
     drums = generate_drum_pattern(DURATION_SECONDS, SAMPLE_RATE)
     sf.write(FIXTURES_DIR / "2024-01-01-Addictive Drums 2.wav", drums, SAMPLE_RATE)
-    print(f"  Created 2024-01-01-Addictive Drums 2.wav")
+    print("  Created 2024-01-01-Addictive Drums 2.wav")
 
     # 4. Quiet audio (for normalization tests)
     quiet = tone * 0.01  # -40dB
     sf.write(FIXTURES_DIR / "test_quiet.wav", quiet, SAMPLE_RATE)
-    print(f"  Created test_quiet.wav")
+    print("  Created test_quiet.wav")
 
     # 5. Loud audio (for limiting tests)
     loud = np.clip(tone * 2, -1, 1)
     sf.write(FIXTURES_DIR / "test_loud.wav", loud, SAMPLE_RATE)
-    print(f"  Created test_loud.wav")
+    print("  Created test_loud.wav")
 
 
 def create_video_fixtures():
@@ -126,16 +126,31 @@ def create_video_fixtures():
 
     # Single chapter file
     cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"testsrc=duration={video_duration}:size=640x480:rate=30",
-        "-f", "lavfi", "-i", f"sine=frequency=440:duration={video_duration}",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-        "-c:a", "aac", "-b:a", "64k",
+        "ffmpeg",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"testsrc=duration={video_duration}:size=640x480:rate=30",
+        "-f",
+        "lavfi",
+        "-i",
+        f"sine=frequency=440:duration={video_duration}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "28",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "64k",
         "-shortest",
         str(FIXTURES_DIR / "GOPR0001.MP4"),
     ]
     subprocess.run(cmd, capture_output=True, check=True)
-    print(f"  Created GOPR0001.MP4")
+    print("  Created GOPR0001.MP4")
 
     # Multi-chapter files (session 0002)
     for chapter in range(3):
@@ -148,11 +163,26 @@ def create_video_fixtures():
         freq = 440 + chapter * 100
 
         cmd = [
-            "ffmpeg", "-y",
-            "-f", "lavfi", "-i", f"testsrc=duration={video_duration}:size=640x480:rate=30",
-            "-f", "lavfi", "-i", f"sine=frequency={freq}:duration={video_duration}",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-            "-c:a", "aac", "-b:a", "64k",
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc=duration={video_duration}:size=640x480:rate=30",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency={freq}:duration={video_duration}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "28",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "64k",
             "-shortest",
             str(FIXTURES_DIR / filename),
         ]
@@ -171,7 +201,11 @@ def main():
     print()
 
     # Show total size
-    total_size = sum(f.stat().st_size for f in FIXTURES_DIR.glob("*") if f.is_file() and f.suffix in [".wav", ".MP4"])
+    total_size = sum(
+        f.stat().st_size
+        for f in FIXTURES_DIR.glob("*")
+        if f.is_file() and f.suffix in [".wav", ".MP4"]
+    )
     print(f"Total fixture size: {total_size / 1024 / 1024:.2f} MB")
 
 

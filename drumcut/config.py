@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -12,6 +11,7 @@ import yaml
 @dataclass
 class AudioConfig:
     """Audio processing configuration."""
+
     target_lufs: float = -14.0
     true_peak: float = -1.0
     left_pan: float = -0.5
@@ -22,6 +22,7 @@ class AudioConfig:
 @dataclass
 class VideoConfig:
     """Video processing configuration."""
+
     chapter_overlap: float = 0.5
     filter_preset: str = "death-metal"
 
@@ -29,28 +30,31 @@ class VideoConfig:
 @dataclass
 class SegmentationConfig:
     """Segmentation configuration."""
+
     min_duration: int = 30
     padding: float = 3.0
-    energy_threshold: Optional[float] = None  # None = auto
+    energy_threshold: float | None = None  # None = auto
 
 
 @dataclass
 class GroupingConfig:
     """Grouping configuration."""
+
     method: str = "dtw"
-    threshold: Optional[float] = None  # None = auto
+    threshold: float | None = None  # None = auto
 
 
 @dataclass
 class Config:
     """Main configuration container."""
+
     audio: AudioConfig = field(default_factory=AudioConfig)
     video: VideoConfig = field(default_factory=VideoConfig)
     segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
     grouping: GroupingConfig = field(default_factory=GroupingConfig)
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "Config":
+    def load(cls, path: Path | None = None) -> Config:
         """Load configuration from YAML file."""
         if path is None:
             path = Path.home() / ".config" / "drumcut" / "config.yaml"
@@ -68,7 +72,7 @@ class Config:
             grouping=GroupingConfig(**data.get("grouping", {})),
         )
 
-    def save(self, path: Optional[Path] = None) -> None:
+    def save(self, path: Path | None = None) -> None:
         """Save configuration to YAML file."""
         if path is None:
             path = Path.home() / ".config" / "drumcut" / "config.yaml"

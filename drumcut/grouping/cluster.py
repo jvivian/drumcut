@@ -91,8 +91,8 @@ def organize_output(
     Returns:
         Manifest dict with group information.
     """
-    from pathlib import Path
     import shutil
+    from pathlib import Path
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -112,10 +112,12 @@ def organize_output(
 
             shutil.copy(src_path, dst_path)
 
-            group_info["segments"].append({
-                "file": dst_name,
-                "original_index": idx,
-            })
+            group_info["segments"].append(
+                {
+                    "file": dst_name,
+                    "original_index": idx,
+                }
+            )
 
         manifest["groups"][label] = group_info
 

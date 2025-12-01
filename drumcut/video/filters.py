@@ -68,18 +68,25 @@ def apply_filter(
     # If raw/null filter, just copy
     if filter_string == "null":
         import shutil
+
         shutil.copy(input_path, output_path)
         return
 
     cmd = [
         "ffmpeg",
         "-y",
-        "-i", str(input_path),
-        "-vf", filter_string,
-        "-c:v", "libx264",
-        "-crf", str(crf),
-        "-preset", "medium",
-        "-c:a", "copy",
+        "-i",
+        str(input_path),
+        "-vf",
+        filter_string,
+        "-c:v",
+        "libx264",
+        "-crf",
+        str(crf),
+        "-preset",
+        "medium",
+        "-c:a",
+        "copy",
         str(output_path),
     ]
 
@@ -108,8 +115,10 @@ def preview_filter(
 
     cmd = [
         "ffplay",
-        "-t", str(duration),
-        "-vf", filter_string,
+        "-t",
+        str(duration),
+        "-vf",
+        filter_string,
         str(input_path),
     ]
 

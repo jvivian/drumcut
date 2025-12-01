@@ -6,7 +6,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from drumcut.audio.align import find_offset
 from drumcut.video.gopro import GoProFile
 
 
@@ -39,9 +38,12 @@ def _get_video_duration(video_path: Path) -> float:
     """Get duration of video file in seconds."""
     cmd = [
         "ffprobe",
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
         str(video_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -172,6 +174,7 @@ def merge_chapters(
     if len(files) == 1:
         # Single file, just copy
         import shutil
+
         shutil.copy(files[0].path, output_path)
         return output_path
 
@@ -182,11 +185,11 @@ def merge_chapters(
         overlaps: list[float] = []
         for i in range(len(files) - 1):
             if overlap_trim == "auto":
-                overlap, strength = detect_chapter_overlap(
-                    files[i].path, files[i + 1].path
-                )
+                overlap, strength = detect_chapter_overlap(files[i].path, files[i + 1].path)
                 if verbose:
-                    print(f"  Ch{i}→Ch{i+1}: {overlap:.2f}s overlap (correlation: {strength:.3f})")
+                    print(
+                        f"  Ch{i}→Ch{i + 1}: {overlap:.2f}s overlap (correlation: {strength:.3f})"
+                    )
                 overlaps.append(overlap)
             else:
                 overlaps.append(float(overlap_trim))
@@ -219,10 +222,14 @@ def merge_chapters(
         cmd = [
             "ffmpeg",
             "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", str(concat_file),
-            "-c", "copy",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_file),
+            "-c",
+            "copy",
             str(output_path),
         ]
 
@@ -238,9 +245,12 @@ def _trim_end(input_path: Path, output_path: Path, seconds: float) -> None:
     # First, get duration
     probe_cmd = [
         "ffprobe",
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
         str(input_path),
     ]
 
@@ -258,9 +268,12 @@ def _trim_end(input_path: Path, output_path: Path, seconds: float) -> None:
     cmd = [
         "ffmpeg",
         "-y",
-        "-i", str(input_path),
-        "-t", str(new_duration),
-        "-c", "copy",
+        "-i",
+        str(input_path),
+        "-t",
+        str(new_duration),
+        "-c",
+        "copy",
         str(output_path),
     ]
 

@@ -32,10 +32,13 @@ def extract_audio_from_video(video_path: Path | str, sr: int = 8000) -> tuple[np
         cmd = [
             "ffmpeg",
             "-y",
-            "-i", str(video_path),
+            "-i",
+            str(video_path),
             "-vn",
-            "-ac", "1",
-            "-ar", str(sr),
+            "-ac",
+            "1",
+            "-ar",
+            str(sr),
             str(tmp_path),
         ]
 
@@ -89,9 +92,10 @@ def sync_audio_to_video(
     # Warn if large offset
     if abs(offset_seconds) > search_window:
         import warnings
+
         warnings.warn(
-            f"Large sync offset detected: {offset_seconds:.2f}s "
-            f"(search window: {search_window}s)"
+            f"Large sync offset detected: {offset_seconds:.2f}s (search window: {search_window}s)",
+            stacklevel=2,
         )
 
     # Mux with offset
@@ -102,12 +106,18 @@ def sync_audio_to_video(
         cmd = [
             "ffmpeg",
             "-y",
-            "-i", str(video_path),
-            "-i", str(audio_path),
-            "-c:v", "copy",
-            "-map", "0:v",
-            "-map", "1:a",
-            "-af", audio_filter,
+            "-i",
+            str(video_path),
+            "-i",
+            str(audio_path),
+            "-c:v",
+            "copy",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-af",
+            audio_filter,
             str(output_path),
         ]
     else:
@@ -116,12 +126,18 @@ def sync_audio_to_video(
         cmd = [
             "ffmpeg",
             "-y",
-            "-i", str(video_path),
-            "-ss", str(trim_seconds),
-            "-i", str(audio_path),
-            "-c:v", "copy",
-            "-map", "0:v",
-            "-map", "1:a",
+            "-i",
+            str(video_path),
+            "-ss",
+            str(trim_seconds),
+            "-i",
+            str(audio_path),
+            "-c:v",
+            "copy",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
             "-shortest",
             str(output_path),
         ]

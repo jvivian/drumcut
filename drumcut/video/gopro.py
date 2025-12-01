@@ -10,6 +10,7 @@ from pathlib import Path
 @dataclass
 class GoProFile:
     """Parsed GoPro file information."""
+
     path: Path
     session_id: int
     chapter: int

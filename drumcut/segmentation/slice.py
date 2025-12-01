@@ -34,10 +34,14 @@ def extract_segment(
         cmd = [
             "ffmpeg",
             "-y",
-            "-ss", str(start_seconds),
-            "-i", str(input_path),
-            "-t", str(duration_seconds),
-            "-c", "copy",
+            "-ss",
+            str(start_seconds),
+            "-i",
+            str(input_path),
+            "-t",
+            str(duration_seconds),
+            "-c",
+            "copy",
             str(output_path),
         ]
     else:
@@ -45,10 +49,14 @@ def extract_segment(
         cmd = [
             "ffmpeg",
             "-y",
-            "-i", str(input_path),
-            "-ss", str(start_seconds),
-            "-t", str(duration_seconds),
-            "-c", "copy",
+            "-i",
+            str(input_path),
+            "-ss",
+            str(start_seconds),
+            "-t",
+            str(duration_seconds),
+            "-c",
+            "copy",
             str(output_path),
         ]
 

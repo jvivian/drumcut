@@ -12,6 +12,7 @@ from scipy.ndimage import binary_dilation, binary_erosion
 @dataclass
 class Segment:
     """Detected activity segment."""
+
     start_seconds: float
     end_seconds: float
 

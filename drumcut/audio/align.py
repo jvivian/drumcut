@@ -84,9 +84,10 @@ def align_tracks(
 
         if abs(offset) > max_offset_samples:
             import warnings
+
             warnings.warn(
-                f"Large offset detected: {offset / sr:.3f}s "
-                f"(max expected: {max_offset_seconds}s)"
+                f"Large offset detected: {offset / sr:.3f}s (max expected: {max_offset_seconds}s)",
+                stacklevel=2,
             )
 
         offsets.append(offset)
