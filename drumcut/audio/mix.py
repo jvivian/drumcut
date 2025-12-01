@@ -321,9 +321,7 @@ def mix_session_ffmpeg(
     filter_parts.append(f"{mix_inputs}amix=inputs={input_idx}:duration=longest[mixed]")
 
     # Add loudnorm filter for normalization
-    filter_parts.append(
-        f"[mixed]loudnorm=I={target_lufs}:TP=-1.0:LRA=11[out]"
-    )
+    filter_parts.append(f"[mixed]loudnorm=I={target_lufs}:TP=-1.0:LRA=11[out]")
 
     filter_complex = ";".join(filter_parts)
 

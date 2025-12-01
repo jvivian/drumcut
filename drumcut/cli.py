@@ -241,8 +241,16 @@ def process(
                     audio_path = tmpdir / f"{seg_path.stem}.wav"
                     subprocess.run(
                         [
-                            "ffmpeg", "-y", "-i", str(seg_path),
-                            "-vn", "-ac", "1", "-ar", "22050", str(audio_path),
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            str(seg_path),
+                            "-vn",
+                            "-ac",
+                            "1",
+                            "-ar",
+                            "22050",
+                            str(audio_path),
                         ],
                         capture_output=True,
                     )
