@@ -51,6 +51,7 @@ def process(
     5. Group similar segments (optional)
     """
     import shutil
+    import subprocess
     import tempfile
 
     from drumcut.audio.io import detect_track_roles, load_audio
@@ -59,16 +60,10 @@ def process(
     from drumcut.grouping.similarity import compute_distance_matrix
     from drumcut.segmentation.detect import detect_activity_regions
     from drumcut.segmentation.slice import extract_segments
+    from drumcut.ui import PipelineUI
     from drumcut.video.gopro import find_gopro_files, group_by_session
     from drumcut.video.merge import merge_chapters
     from drumcut.video.sync import sync_audio_to_video
-
-    console.print(f"[bold blue]Processing session:[/] {session_folder}")
-    console.print(f"[bold blue]Output directory:[/] {output}")
-    console.print(f"[bold blue]Filter preset:[/] {filter_preset}")
-
-    if dry_run:
-        console.print("[yellow]Dry run mode - previewing operations[/]")
 
     # Create output directories
     output = Path(output)
@@ -76,21 +71,13 @@ def process(
     segments_dir = output / "segments"
     grouped_dir = output / "grouped"
 
-    if not dry_run:
-        output.mkdir(parents=True, exist_ok=True)
-        intermediates_dir.mkdir(exist_ok=True)
-
-    # Step 1: Find and merge GoPro files
-    console.print("\n[bold]Step 1: Merge GoPro chapters[/]")
-    merged_video = intermediates_dir / "merged.mp4"
-
+    # Pre-flight: Find GoPro files and validate
     gopro_files = find_gopro_files(session_folder)
     if not gopro_files:
         console.print("[red]No GoPro files found[/]")
         raise typer.Exit(1)
 
     sessions = group_by_session(gopro_files)
-    console.print(f"Found {len(sessions)} session(s): {list(sessions.keys())}")
 
     # Select session
     if session_id is not None:
@@ -108,181 +95,141 @@ def process(
             console.print(f"  Session {sid}: {len(sfiles)} chapters ({total_size:.1f} GB)")
         raise typer.Exit(1)
 
-    console.print(f"Using session {session_id}: {len(selected_files)} chapters")
-
-    if skip_merge and merged_video.exists():
-        console.print("[dim]Skipping merge (using existing)[/]")
-    elif not dry_run:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task("Merging chapters...", total=None)
-            merge_chapters(selected_files, merged_video, overlap_trim="auto", verbose=True)
-        console.print(f"[green]✓[/] Merged to {merged_video}")
-    else:
-        console.print(f"[dim]Would merge {len(selected_files)} chapters[/]")
-
-    # Step 2: Mix audio tracks
-    console.print("\n[bold]Step 2: Mix audio tracks[/]")
-    mixed_audio = intermediates_dir / "mixed.wav"
-
+    # Find audio files
     audio_files = list(session_folder.glob("*.wav")) + list(session_folder.glob("*.WAV"))
-    if not audio_files:
-        console.print("[yellow]No audio files found - skipping mix[/]")
-        skip_mix = True
-        skip_sync = True
-    else:
-        roles = detect_track_roles(audio_files)
-        console.print(f"Found tracks: {list(roles.keys())}")
+    roles = detect_track_roles(audio_files) if audio_files else {}
 
-        if skip_mix and mixed_audio.exists():
-            console.print("[dim]Skipping mix (using existing)[/]")
-        elif not dry_run:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                progress.add_task("Mixing tracks...", total=None)
-                mix_session(session_folder, mixed_audio, verbose=True)
-            console.print(f"[green]✓[/] Mixed to {mixed_audio}")
-        else:
-            console.print(f"[dim]Would mix {len(roles)} tracks[/]")
+    if dry_run:
+        # Simple dry run output
+        console.print("\n[bold]🥁 drumcut Pipeline[/] [dim](dry run)[/]\n")
+        console.print(f"  Session: {session_folder}")
+        console.print(f"  Output:  {output}")
+        console.print(f"  GoPro:   Session {session_id} ({len(selected_files)} chapters)")
+        console.print(f"  Audio:   {list(roles.keys()) if roles else 'None found'}")
+        console.print()
+        console.print("  [dim]1.[/] Merge Video    → Would merge chapters")
+        console.print("  [dim]2.[/] Mix Audio      → Would mix tracks")
+        console.print("  [dim]3.[/] Sync A/V       → Would sync audio")
+        console.print("  [dim]4.[/] Segment        → Would detect songs")
+        console.print("  [dim]5.[/] Group          → Would cluster similar")
+        console.print()
+        return
 
-    # Step 3: Sync audio to video
-    console.print("\n[bold]Step 3: Sync audio to video[/]")
+    # Create directories
+    output.mkdir(parents=True, exist_ok=True)
+    intermediates_dir.mkdir(exist_ok=True)
+
+    merged_video = intermediates_dir / "merged.mp4"
+    mixed_audio = intermediates_dir / "mixed.wav"
     synced_video = intermediates_dir / "synced.mp4"
 
-    if skip_sync or skip_mix:
-        console.print("[dim]Skipping sync[/]")
-        synced_video = merged_video
-    elif not dry_run:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task("Syncing audio...", total=None)
-            result = sync_audio_to_video(merged_video, mixed_audio, synced_video)
-        console.print(
-            f"[green]✓[/] Synced (offset: {result['offset_seconds']:.3f}s, "
-            f"correlation: {result['correlation_strength']:.3f})"
-        )
-    else:
-        console.print("[dim]Would sync audio to video[/]")
+    # Create UI
+    ui = PipelineUI(title="🥁 drumcut Pipeline")
+    ui.add_step("Merge Video", f"Merge {len(selected_files)} GoPro chapters")
+    ui.add_step("Mix Audio", f"Mix {len(roles)} audio tracks" if roles else "No audio")
+    ui.add_step("Sync A/V", "Sync audio to video")
+    ui.add_step("Segment", "Detect song boundaries")
+    ui.add_step("Group", "Cluster similar segments")
 
-    # Step 4: Segment video
-    console.print("\n[bold]Step 4: Segment by song boundaries[/]")
+    segments = []
+    segment_paths = []
 
-    if skip_segment:
-        console.print("[dim]Skipping segmentation[/]")
-    else:
-        # Find MIDI track for energy detection
-        midi_track = roles.get("midi") if "roles" in dir() and roles else None
-        if midi_track is None and audio_files:
-            roles = detect_track_roles(audio_files)
-            midi_track = roles.get("midi")
-
-        if midi_track is None:
-            console.print("[yellow]No MIDI track found - skipping segmentation[/]")
-        elif not dry_run:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                progress.add_task("Detecting segments...", total=None)
-                audio, sr = load_audio(midi_track)
-                segments = detect_activity_regions(
-                    audio, sr, min_duration=min_duration, padding=padding
-                )
-
-            console.print(f"Found {len(segments)} segment(s)")
-            for i, seg in enumerate(segments, 1):
-                mins, secs = divmod(seg.start_seconds, 60)
-                console.print(f"  {i}. {int(mins):02d}:{secs:05.2f} ({seg.duration_seconds:.1f}s)")
-
-            # Extract segments
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                progress.add_task("Extracting segments...", total=None)
-                segment_paths = extract_segments(synced_video, segments, segments_dir)
-            console.print(f"[green]✓[/] Extracted {len(segment_paths)} segments to {segments_dir}")
+    with ui:
+        # Step 1: Merge video
+        if skip_merge and merged_video.exists():
+            ui.skip_step(0, "Using existing")
         else:
-            console.print("[dim]Would detect and extract segments[/]")
+            ui.start_step(0, f"Merging {len(selected_files)} chapters...")
+            merge_chapters(selected_files, merged_video, overlap_trim="auto", verbose=False)
+            size_gb = merged_video.stat().st_size / 1024 / 1024 / 1024
+            ui.complete_step(0, f"{size_gb:.1f} GB")
 
-    # Step 5: Group similar segments
-    console.print("\n[bold]Step 5: Group similar segments[/]")
+        # Step 2: Mix audio
+        if not roles:
+            ui.skip_step(1, "No audio files")
+            skip_mix = True
+            skip_sync = True
+        elif skip_mix and mixed_audio.exists():
+            ui.skip_step(1, "Using existing")
+        else:
+            ui.start_step(1, f"Mixing {len(roles)} tracks...")
+            mix_session(session_folder, mixed_audio, verbose=False)
+            ui.complete_step(1, f"{', '.join(roles.keys())}")
 
-    if skip_group or skip_segment:
-        console.print("[dim]Skipping grouping[/]")
-    elif not dry_run and segments_dir.exists():
-        segment_files = sorted(segments_dir.glob("*.mp4"))
-        if len(segment_files) >= 2:
-            import subprocess
+        # Step 3: Sync audio to video
+        if skip_sync or skip_mix:
+            ui.skip_step(2, "Skipped")
+            synced_video = merged_video
+        else:
+            ui.start_step(2, "Finding sync offset...")
+            result = sync_audio_to_video(merged_video, mixed_audio, synced_video)
+            offset_ms = result["offset_seconds"] * 1000
+            ui.complete_step(2, f"Offset: {offset_ms:+.0f}ms")
+
+        # Step 4: Segment
+        midi_track = roles.get("midi") if roles else None
+        if skip_segment:
+            ui.skip_step(3, "Skipped")
+        elif midi_track is None:
+            ui.skip_step(3, "No MIDI track")
+        else:
+            ui.start_step(3, "Analyzing energy...")
+            audio, sr = load_audio(midi_track)
+            segments = detect_activity_regions(
+                audio, sr, min_duration=min_duration, padding=padding
+            )
+            ui.update_step(f"Extracting {len(segments)} segments...")
+
+            if segments:
+                segment_paths = extract_segments(synced_video, segments, segments_dir)
+                ui.complete_step(3, f"{len(segments)} segments")
+            else:
+                ui.complete_step(3, "No segments found")
+
+        # Step 5: Group
+        if skip_group or not segment_paths:
+            ui.skip_step(4, "Skipped")
+        elif len(segment_paths) < 2:
+            ui.skip_step(4, "Need ≥2 segments")
+        else:
+            ui.start_step(4, "Extracting audio...")
+            segment_files = sorted(segments_dir.glob("*.mp4"))
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmpdir = Path(tmpdir)
                 audio_paths = []
 
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    console=console,
-                ) as progress:
-                    progress.add_task("Extracting audio for fingerprinting...", total=None)
-                    for seg_path in segment_files:
-                        audio_path = tmpdir / f"{seg_path.stem}.wav"
-                        subprocess.run(
-                            [
-                                "ffmpeg",
-                                "-y",
-                                "-i",
-                                str(seg_path),
-                                "-vn",
-                                "-ac",
-                                "1",
-                                "-ar",
-                                "22050",
-                                str(audio_path),
-                            ],
-                            capture_output=True,
-                        )
-                        audio_paths.append(audio_path)
+                for seg_path in segment_files:
+                    audio_path = tmpdir / f"{seg_path.stem}.wav"
+                    subprocess.run(
+                        [
+                            "ffmpeg", "-y", "-i", str(seg_path),
+                            "-vn", "-ac", "1", "-ar", "22050", str(audio_path),
+                        ],
+                        capture_output=True,
+                    )
+                    audio_paths.append(audio_path)
 
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    console=console,
-                ) as progress:
-                    progress.add_task("Computing similarity...", total=None)
-                    distances = compute_distance_matrix(audio_paths)
-                    groups = cluster_segments(distances)
+                ui.update_step("Computing similarity...")
+                distances = compute_distance_matrix(audio_paths)
+                groups = cluster_segments(distances)
 
-                console.print(f"Found {len(groups)} group(s):")
-                for label, indices in groups.items():
-                    names = [segment_files[i].name for i in indices]
-                    console.print(f"  Group {label}: {len(names)} segment(s)")
-
+                ui.update_step("Organizing output...")
                 organize_output(segment_files, groups, grouped_dir)
-                console.print(f"[green]✓[/] Organized into {grouped_dir}")
-        else:
-            console.print("[dim]Not enough segments for grouping[/]")
-    else:
-        console.print("[dim]Would group similar segments[/]")
+                ui.complete_step(4, f"{len(groups)} groups")
 
     # Cleanup intermediates
-    if not keep_intermediates and not dry_run and intermediates_dir.exists():
-        console.print("\n[dim]Cleaning up intermediates...[/]")
+    if not keep_intermediates and intermediates_dir.exists():
         shutil.rmtree(intermediates_dir)
 
-    console.print("\n[bold green]✓ Pipeline complete![/]")
-    console.print(f"Output: {output}")
+    # Summary
+    console.print()
+    console.print("[bold green]✓ Pipeline complete![/]")
+    console.print(f"  Output: {output}")
+    if segments:
+        console.print(f"  Segments: {len(segments)}")
+    if segment_paths and not skip_group:
+        console.print(f"  Groups: {grouped_dir}")
 
 
 @app.command()
