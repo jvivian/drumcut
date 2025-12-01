@@ -18,23 +18,27 @@ class TestAutoThreshold:
 
     def test_basic_threshold(self):
         # Simple distance matrix
-        distances = np.array([
-            [0.0, 0.1, 0.8],
-            [0.1, 0.0, 0.7],
-            [0.8, 0.7, 0.0],
-        ])
+        distances = np.array(
+            [
+                [0.0, 0.1, 0.8],
+                [0.1, 0.0, 0.7],
+                [0.8, 0.7, 0.0],
+            ]
+        )
         threshold = auto_threshold(distances)
 
         assert threshold > 0
         assert threshold < 1.0
 
     def test_default_percentile(self):
-        distances = np.array([
-            [0.0, 0.2, 0.4, 0.6],
-            [0.2, 0.0, 0.3, 0.5],
-            [0.4, 0.3, 0.0, 0.7],
-            [0.6, 0.5, 0.7, 0.0],
-        ])
+        distances = np.array(
+            [
+                [0.0, 0.2, 0.4, 0.6],
+                [0.2, 0.0, 0.3, 0.5],
+                [0.4, 0.3, 0.0, 0.7],
+                [0.6, 0.5, 0.7, 0.0],
+            ]
+        )
         # 30th percentile is the default
         threshold = auto_threshold(distances, percentile=30)
 
@@ -50,12 +54,14 @@ class TestAutoThreshold:
         assert threshold == 0.5  # Default fallback
 
     def test_custom_percentile(self):
-        distances = np.array([
-            [0.0, 0.1, 0.5, 0.9],
-            [0.1, 0.0, 0.4, 0.8],
-            [0.5, 0.4, 0.0, 0.6],
-            [0.9, 0.8, 0.6, 0.0],
-        ])
+        distances = np.array(
+            [
+                [0.0, 0.1, 0.5, 0.9],
+                [0.1, 0.0, 0.4, 0.8],
+                [0.5, 0.4, 0.0, 0.6],
+                [0.9, 0.8, 0.6, 0.0],
+            ]
+        )
 
         threshold_low = auto_threshold(distances, percentile=10)
         threshold_high = auto_threshold(distances, percentile=90)
@@ -68,11 +74,13 @@ class TestClusterSegments:
 
     def test_all_similar_one_group(self):
         # All segments very similar
-        distances = np.array([
-            [0.0, 0.05, 0.08],
-            [0.05, 0.0, 0.06],
-            [0.08, 0.06, 0.0],
-        ])
+        distances = np.array(
+            [
+                [0.0, 0.05, 0.08],
+                [0.05, 0.0, 0.06],
+                [0.08, 0.06, 0.0],
+            ]
+        )
 
         groups = cluster_segments(distances, threshold=0.5)
 
@@ -82,11 +90,13 @@ class TestClusterSegments:
 
     def test_all_different_separate_groups(self):
         # All segments very different
-        distances = np.array([
-            [0.0, 0.9, 0.95],
-            [0.9, 0.0, 0.85],
-            [0.95, 0.85, 0.0],
-        ])
+        distances = np.array(
+            [
+                [0.0, 0.9, 0.95],
+                [0.9, 0.0, 0.85],
+                [0.95, 0.85, 0.0],
+            ]
+        )
 
         groups = cluster_segments(distances, threshold=0.1)
 
@@ -95,12 +105,14 @@ class TestClusterSegments:
 
     def test_two_clusters(self):
         # Two pairs of similar segments
-        distances = np.array([
-            [0.0, 0.1, 0.8, 0.85],  # 0 similar to 1
-            [0.1, 0.0, 0.82, 0.83],
-            [0.8, 0.82, 0.0, 0.12],  # 2 similar to 3
-            [0.85, 0.83, 0.12, 0.0],
-        ])
+        distances = np.array(
+            [
+                [0.0, 0.1, 0.8, 0.85],  # 0 similar to 1
+                [0.1, 0.0, 0.82, 0.83],
+                [0.8, 0.82, 0.0, 0.12],  # 2 similar to 3
+                [0.85, 0.83, 0.12, 0.0],
+            ]
+        )
 
         groups = cluster_segments(distances, threshold=0.5)
 
@@ -110,11 +122,13 @@ class TestClusterSegments:
         assert sorted(groups["B"]) == [2, 3]
 
     def test_auto_threshold(self):
-        distances = np.array([
-            [0.0, 0.1, 0.9],
-            [0.1, 0.0, 0.85],
-            [0.9, 0.85, 0.0],
-        ])
+        distances = np.array(
+            [
+                [0.0, 0.1, 0.9],
+                [0.1, 0.0, 0.85],
+                [0.9, 0.85, 0.0],
+            ]
+        )
 
         # Should auto-compute threshold
         groups = cluster_segments(distances)

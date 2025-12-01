@@ -175,14 +175,10 @@ class TestDetectActivityRegions:
         audio = np.sin(2 * np.pi * 440 * t) * 0.1
 
         # Very low threshold should detect activity
-        segments_low = detect_activity_regions(
-            audio, sr, min_duration=10.0, threshold=0.001
-        )
+        segments_low = detect_activity_regions(audio, sr, min_duration=10.0, threshold=0.001)
 
         # Very high threshold should not detect activity
-        segments_high = detect_activity_regions(
-            audio, sr, min_duration=10.0, threshold=1.0
-        )
+        segments_high = detect_activity_regions(audio, sr, min_duration=10.0, threshold=1.0)
 
         assert len(segments_low) >= len(segments_high)
 

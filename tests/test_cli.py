@@ -46,9 +46,7 @@ class TestProcessCommand:
         gopro_file = tmp_path / "GOPR0001.MP4"
         gopro_file.write_bytes(b"fake video")
 
-        result = runner.invoke(
-            app, ["process", str(tmp_path), "--session-id", "9999", "--dry-run"]
-        )
+        result = runner.invoke(app, ["process", str(tmp_path), "--session-id", "9999", "--dry-run"])
 
         assert result.exit_code == 1
         assert "not found" in result.output
