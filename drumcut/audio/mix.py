@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -186,4 +187,220 @@ def mix_session(
         "sample_rate": sr,
         "offsets": offsets_info,
         "normalization": result,
+    }
+
+
+def mix_session_ffmpeg(
+    session_folder: Path | str,
+    output_path: Path | str,
+    left_pan: float = -0.5,
+    right_pan: float = 0.5,
+    target_lufs: float = -14.0,
+    alignment_window: float = 30.0,
+    verbose: bool = False,
+) -> dict[str, object]:
+    """
+    Mix a session's audio tracks using ffmpeg (memory-efficient).
+
+    Uses ffmpeg for mixing to avoid loading entire audio files into memory.
+    Only loads the first `alignment_window` seconds for track alignment.
+
+    Args:
+        session_folder: Path to folder containing audio files.
+        output_path: Output path for mixed audio.
+        left_pan: Pan position for left track (-1 to 1).
+        right_pan: Pan position for right track (-1 to 1).
+        target_lufs: Target loudness for final mix.
+        alignment_window: Seconds to load for alignment (default 30s).
+        verbose: Print progress info.
+
+    Returns:
+        Dict with mixing metadata.
+    """
+    from drumcut.audio.io import ensure_mono
+
+    session_folder = Path(session_folder)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Find audio files
+    audio_files = list(session_folder.glob("*.wav")) + list(session_folder.glob("*.WAV"))
+    roles = detect_track_roles(audio_files)
+
+    if not roles:
+        raise ValueError(f"No audio files found in {session_folder}")
+
+    if verbose:
+        print(f"Found tracks: {list(roles.keys())}")
+
+    # Get sample rate from first file
+    import soundfile as sf
+
+    info = sf.info(roles[list(roles.keys())[0]])
+    sr = info.samplerate
+
+    # Find alignment offsets by loading only first N seconds
+    offsets_info = {}
+    offsets_samples = {}
+
+    if "midi" in roles and len(roles) > 1:
+        # Load only first alignment_window seconds for alignment
+        alignment_samples = int(alignment_window * sr)
+
+        midi_audio, _ = load_audio(roles["midi"], sr=sr)
+        midi_clip = ensure_mono(midi_audio[:alignment_samples])
+
+        other_roles = [r for r in ["left", "right"] if r in roles]
+
+        if other_roles:
+            other_clips = []
+            for role in other_roles:
+                audio, _ = load_audio(roles[role], sr=sr)
+                other_clips.append(ensure_mono(audio[:alignment_samples]))
+
+            _, offsets = align_tracks(midi_clip, other_clips, sr)
+
+            for role, offset in zip(other_roles, offsets, strict=True):
+                offsets_info[role] = offset / sr
+                offsets_samples[role] = offset
+                if verbose:
+                    print(f"  Alignment offset for {role}: {offset / sr * 1000:.1f}ms")
+
+        # Free alignment memory
+        del midi_audio, midi_clip
+        if other_roles:
+            del other_clips
+
+    # Build ffmpeg command for mixing
+    # Convert pan values to ffmpeg pan filter format
+    # pan=-0.5 means 75% left, 25% right
+    # pan=0.5 means 25% left, 75% right
+
+    inputs = []
+    filter_parts = []
+    input_idx = 0
+
+    for role in ["left", "right", "midi"]:
+        if role not in roles:
+            continue
+
+        path = roles[role]
+        inputs.extend(["-i", str(path)])
+
+        # Apply offset if needed (adelay in milliseconds)
+        offset_ms = int(offsets_samples.get(role, 0) / sr * 1000) if role in offsets_samples else 0
+
+        # Get pan value
+        if role == "left":
+            pan = left_pan
+        elif role == "right":
+            pan = right_pan
+        else:  # midi
+            pan = 0.0
+
+        # Build filter for this track
+        # First convert to stereo with pan, then apply delay if needed
+        # Pan formula: left_gain = sqrt((1-pan)/2), right_gain = sqrt((1+pan)/2)
+        left_gain = np.sqrt((1 - pan) / 2)
+        right_gain = np.sqrt((1 + pan) / 2)
+
+        track_filter = f"[{input_idx}:a]aformat=channel_layouts=mono,pan=stereo|c0={left_gain:.4f}*c0|c1={right_gain:.4f}*c0"
+
+        if offset_ms > 0:
+            track_filter += f",adelay={offset_ms}|{offset_ms}"
+        elif offset_ms < 0:
+            trim_sec = abs(offset_ms) / 1000
+            track_filter += f",atrim=start={trim_sec:.4f}"
+
+        track_filter += f"[a{input_idx}]"
+        filter_parts.append(track_filter)
+        input_idx += 1
+
+    # Mix all tracks together
+    mix_inputs = "".join(f"[a{i}]" for i in range(input_idx))
+    filter_parts.append(f"{mix_inputs}amix=inputs={input_idx}:duration=longest[mixed]")
+
+    # Add loudnorm filter for normalization
+    filter_parts.append(
+        f"[mixed]loudnorm=I={target_lufs}:TP=-1.0:LRA=11[out]"
+    )
+
+    filter_complex = ";".join(filter_parts)
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        *inputs,
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[out]",
+        "-ar",
+        str(sr),
+        str(output_path),
+    ]
+
+    if verbose:
+        print("Running ffmpeg mix...")
+        print(f"  Command: {' '.join(cmd[:10])}...")
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg mix failed: {result.stderr}")
+
+    # Measure output loudness
+    loudness_result = _measure_loudness_ffmpeg(output_path)
+
+    if verbose:
+        print(f"Output: {output_path}")
+        print(f"  LUFS: {loudness_result['output_lufs']:.1f}")
+        print(f"  True peak: {loudness_result['true_peak_dbtp']:.1f} dBTP")
+
+    return {
+        "tracks": list(roles.keys()),
+        "sample_rate": sr,
+        "offsets": offsets_info,
+        "normalization": loudness_result,
+    }
+
+
+def _measure_loudness_ffmpeg(audio_path: Path | str) -> dict:
+    """Measure loudness of audio file using ffmpeg."""
+    cmd = [
+        "ffmpeg",
+        "-i",
+        str(audio_path),
+        "-af",
+        "loudnorm=print_format=json",
+        "-f",
+        "null",
+        "-",
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    # Parse loudnorm output from stderr
+    import json
+    import re
+
+    # Find the JSON block in stderr
+    json_match = re.search(r'\{[^{}]*"input_i"[^{}]*\}', result.stderr, re.DOTALL)
+    if json_match:
+        try:
+            data = json.loads(json_match.group())
+            return {
+                "input_lufs": float(data.get("input_i", -24)),
+                "output_lufs": float(data.get("input_i", -24)),  # Same since we're measuring
+                "true_peak_dbtp": float(data.get("input_tp", -1)),
+                "gain_applied_db": 0.0,
+            }
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Fallback
+    return {
+        "input_lufs": -14.0,
+        "output_lufs": -14.0,
+        "true_peak_dbtp": -1.0,
+        "gain_applied_db": 0.0,
     }

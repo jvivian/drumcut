@@ -106,7 +106,7 @@ def process(
     import tempfile
 
     from drumcut.audio.io import detect_track_roles, load_audio
-    from drumcut.audio.mix import mix_session
+    from drumcut.audio.mix import mix_session_ffmpeg
     from drumcut.grouping.cluster import cluster_segments, organize_output
     from drumcut.grouping.similarity import compute_distance_matrix
     from drumcut.segmentation.detect import detect_activity_regions
@@ -191,7 +191,7 @@ def process(
             ui.skip_step(1, "Using existing")
         else:
             ui.start_step(1, f"Mixing {len(roles)} tracks...")
-            mix_session(session_folder, mixed_audio, verbose=False)
+            mix_session_ffmpeg(session_folder, mixed_audio, verbose=False)
             ui.complete_step(1, f"{', '.join(roles.keys())}")
 
         # Step 3: Sync audio to video
