@@ -4,7 +4,7 @@ A Python CLI tool for automating drum practice video preprocessing. Takes raw Go
 
 ## Overview
 
-**The Problem:** You record 1-2 hour drum practice sessions with a GoPro and a multi-track Reaper setup (rendered MIDI, Left, Right). Getting these into DaVinci for final editing requires tedious preprocessing: normalizing audio, panning, syncing, converting to greyscale, and manually identifying which segments are actual songs vs. noodling.
+**Problem:** I record 1-2 hour drum practice sessions with a GoPro and a multi-track Reaper setup (rendered MIDI, Left, Right). Getting these into DaVinci for final editing requires tedious preprocessing: normalizing audio, panning, syncing, converting to greyscale, and manually identifying which segments are actual songs vs. noodling or random noise.
 
 **The Solution:** `drumcut` automates the entire preprocessing pipeline, delivering a folder of greyscale video clips grouped by song similarity, ready for drag-and-drop into your editor.
 
