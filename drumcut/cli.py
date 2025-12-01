@@ -240,8 +240,16 @@ def process(
                         audio_path = tmpdir / f"{seg_path.stem}.wav"
                         subprocess.run(
                             [
-                                "ffmpeg", "-y", "-i", str(seg_path),
-                                "-vn", "-ac", "1", "-ar", "22050", str(audio_path),
+                                "ffmpeg",
+                                "-y",
+                                "-i",
+                                str(seg_path),
+                                "-vn",
+                                "-ac",
+                                "1",
+                                "-ar",
+                                "22050",
+                                str(audio_path),
                             ],
                             capture_output=True,
                         )
@@ -280,9 +288,7 @@ def process(
 @app.command()
 def normalize(
     audio_file: Annotated[Path, typer.Argument(help="Audio file to normalize")],
-    output: Annotated[
-        Path | None, typer.Option("--output", "-o", help="Output file path")
-    ] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
     target_lufs: Annotated[float, typer.Option(help="Target loudness in LUFS")] = -14.0,
     true_peak: Annotated[float, typer.Option(help="True peak ceiling in dBTP")] = -1.0,
 ) -> None:
