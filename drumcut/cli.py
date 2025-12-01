@@ -8,6 +8,8 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import IntPrompt
+from rich.table import Table
 
 app = typer.Typer(
     name="drumcut",
@@ -15,6 +17,55 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _select_session(sessions: dict, session_id: int | None = None) -> tuple[int, list]:
+    """Interactive session selection when multiple sessions found.
+
+    Args:
+        sessions: Dict mapping session ID to list of GoPro files.
+        session_id: Pre-selected session ID (optional).
+
+    Returns:
+        Tuple of (selected session_id, list of files).
+    """
+    if session_id is not None:
+        if session_id not in sessions:
+            console.print(f"[red]Session {session_id} not found[/]")
+            raise typer.Exit(1)
+        return session_id, sessions[session_id]
+
+    if len(sessions) == 1:
+        session_id = list(sessions.keys())[0]
+        return session_id, sessions[session_id]
+
+    # Interactive session selection
+    console.print("\n[bold]Multiple sessions found:[/]\n")
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Session ID", width=12)
+    table.add_column("Chapters", width=10)
+    table.add_column("Size", width=10)
+
+    session_ids = sorted(sessions.keys())
+    for idx, sid in enumerate(session_ids, 1):
+        sfiles = sessions[sid]
+        total_size = sum(f.path.stat().st_size for f in sfiles) / 1024 / 1024 / 1024
+        table.add_row(str(idx), str(sid), str(len(sfiles)), f"{total_size:.1f} GB")
+
+    console.print(table)
+    console.print()
+
+    choice = IntPrompt.ask(
+        "[bold]Select session[/]",
+        choices=[str(i) for i in range(1, len(session_ids) + 1)],
+        console=console,
+    )
+    session_id = session_ids[choice - 1]
+    console.print(f"\n[green]Selected session {session_id}[/]\n")
+
+    return session_id, sessions[session_id]
 
 
 @app.command()
@@ -79,21 +130,8 @@ def process(
 
     sessions = group_by_session(gopro_files)
 
-    # Select session
-    if session_id is not None:
-        if session_id not in sessions:
-            console.print(f"[red]Session {session_id} not found[/]")
-            raise typer.Exit(1)
-        selected_files = sessions[session_id]
-    elif len(sessions) == 1:
-        session_id = list(sessions.keys())[0]
-        selected_files = sessions[session_id]
-    else:
-        console.print("[yellow]Multiple sessions found. Use --session-id to select one.[/]")
-        for sid, sfiles in sessions.items():
-            total_size = sum(f.path.stat().st_size for f in sfiles) / 1024 / 1024 / 1024
-            console.print(f"  Session {sid}: {len(sfiles)} chapters ({total_size:.1f} GB)")
-        raise typer.Exit(1)
+    # Select session (interactive if multiple)
+    session_id, selected_files = _select_session(sessions, session_id)
 
     # Find audio files
     audio_files = list(session_folder.glob("*.wav")) + list(session_folder.glob("*.WAV"))
@@ -317,23 +355,9 @@ def merge_video(
         raise typer.Exit(1)
 
     sessions = group_by_session(files)
-    console.print(f"Found {len(sessions)} session(s): {list(sessions.keys())}")
 
-    # Select session
-    if session_id is not None:
-        if session_id not in sessions:
-            console.print(f"[red]Session {session_id} not found[/]")
-            raise typer.Exit(1)
-        selected_files = sessions[session_id]
-    elif len(sessions) == 1:
-        session_id = list(sessions.keys())[0]
-        selected_files = sessions[session_id]
-    else:
-        console.print("[yellow]Multiple sessions found. Use --session-id to select one.[/]")
-        for sid, sfiles in sessions.items():
-            total_size = sum(f.path.stat().st_size for f in sfiles) / 1024 / 1024 / 1024
-            console.print(f"  Session {sid}: {len(sfiles)} chapters ({total_size:.1f} GB)")
-        raise typer.Exit(1)
+    # Select session (interactive if multiple)
+    session_id, selected_files = _select_session(sessions, session_id)
 
     console.print(f"[bold blue]Merging session {session_id}:[/] {len(selected_files)} chapters")
 
