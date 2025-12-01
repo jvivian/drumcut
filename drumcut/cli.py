@@ -258,12 +258,88 @@ def group(
     segments_dir: Annotated[Path, typer.Argument(help="Directory containing segments")],
     output: Annotated[Path, typer.Option("--output", "-o", help="Output directory")] = Path("./grouped"),
     threshold: Annotated[Optional[float], typer.Option(help="Similarity threshold (auto if not set)")] = None,
+    dry_run: Annotated[bool, typer.Option(help="Show groupings without copying files")] = False,
 ) -> None:
     """Group similar segments by audio fingerprinting."""
+    import subprocess
+    import tempfile
+
+    from drumcut.grouping.cluster import cluster_segments, organize_output
+    from drumcut.grouping.similarity import compute_distance_matrix
+
     console.print(f"[bold blue]Grouping segments from:[/] {segments_dir}")
 
-    # TODO: Implement grouping
-    console.print("[red]Grouping not yet implemented[/]")
+    # Find video segments
+    segment_paths = sorted(
+        list(segments_dir.glob("*.mp4")) + list(segments_dir.glob("*.MP4"))
+    )
+
+    if not segment_paths:
+        console.print("[red]No video segments found[/]")
+        raise typer.Exit(1)
+
+    console.print(f"Found {len(segment_paths)} segment(s)")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Extract audio from each segment
+        console.print("[bold blue]Extracting audio for fingerprinting...[/]")
+        audio_paths = []
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Extracting audio...", total=len(segment_paths))
+
+            for seg_path in segment_paths:
+                audio_path = tmpdir / f"{seg_path.stem}.wav"
+                cmd = [
+                    "ffmpeg", "-y", "-i", str(seg_path),
+                    "-vn", "-ac", "1", "-ar", "22050",
+                    str(audio_path),
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    console.print(f"[yellow]Warning: Failed to extract audio from {seg_path.name}[/]")
+                    continue
+                audio_paths.append(audio_path)
+                progress.advance(task)
+
+        if len(audio_paths) < 2:
+            console.print("[yellow]Need at least 2 segments for grouping[/]")
+            raise typer.Exit(0)
+
+        # Compute similarity matrix
+        console.print("[bold blue]Computing audio similarity...[/]")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            progress.add_task("Computing DTW distances...", total=None)
+            distances = compute_distance_matrix(audio_paths)
+
+        # Cluster
+        groups = cluster_segments(distances, threshold=threshold)
+
+        # Display results
+        console.print(f"\n[green]Found {len(groups)} group(s):[/]")
+        for label, indices in groups.items():
+            names = [segment_paths[i].name for i in indices]
+            console.print(f"  Group {label}: {', '.join(names)}")
+
+        if dry_run:
+            console.print("\n[yellow]Dry run - files not copied[/]")
+            return
+
+        # Organize output
+        console.print(f"\n[bold blue]Organizing output to:[/] {output}")
+        manifest = organize_output(segment_paths, groups, output)
+
+        console.print(f"[green]Created {len(groups)} group folder(s)[/]")
 
 
 @app.command()
