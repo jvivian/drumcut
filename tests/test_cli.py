@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -9,6 +10,12 @@ from typer.testing import CliRunner
 from drumcut.cli import app
 
 runner = CliRunner()
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
+    return ansi_pattern.sub("", text)
 
 
 class TestVersionCommand:
@@ -134,14 +141,16 @@ class TestHelpOutput:
 
     def test_process_help(self):
         result = runner.invoke(app, ["process", "--help"])
+        output = strip_ansi(result.output)
 
         assert result.exit_code == 0
-        assert "session_folder" in result.output.lower()
-        assert "--skip-merge" in result.output
+        assert "session_folder" in output.lower()
+        assert "--skip-merge" in output
 
     def test_mix_help(self):
         result = runner.invoke(app, ["mix", "--help"])
+        output = strip_ansi(result.output)
 
         assert result.exit_code == 0
-        assert "--left-pan" in result.output
-        assert "--right-pan" in result.output
+        assert "--left-pan" in output
+        assert "--right-pan" in output
