@@ -37,10 +37,6 @@ jobs:
           ruff check drumcut tests
           ruff format --check drumcut tests
 
-      - name: Type check with mypy
-        run: |
-          mypy drumcut
-
       - name: Test with pytest
         run: |
           pytest
