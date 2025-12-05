@@ -46,8 +46,10 @@ class TestProcessCommand:
 
         assert result.exit_code == 0
         assert "dry run" in result.output
-        assert "Merge Video" in result.output
         assert "Mix Audio" in result.output
+        assert "Song Boundaries" in result.output
+        assert "Process Clips" in result.output
+        assert "Export Songs" in result.output
 
     def test_session_id_not_found(self, tmp_path: Path):
         gopro_file = tmp_path / "GOPR0001.MP4"
@@ -145,7 +147,8 @@ class TestHelpOutput:
 
         assert result.exit_code == 0
         assert "session_folder" in output.lower()
-        assert "--skip-merge" in output
+        assert "--skip-mix" in output
+        assert "--min-song-duration" in output
 
     def test_mix_help(self):
         result = runner.invoke(app, ["mix", "--help"])
