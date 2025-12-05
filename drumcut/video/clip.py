@@ -27,9 +27,12 @@ def get_video_duration(video_path: Path | str) -> float:
     """Get duration of a video file in seconds using ffprobe."""
     cmd = [
         "ffprobe",
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
         str(video_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -56,12 +59,17 @@ def extract_audio_segment(
         cmd = [
             "ffmpeg",
             "-y",
-            "-i", str(video_path),
-            "-t", str(duration),
+            "-i",
+            str(video_path),
+            "-t",
+            str(duration),
             "-vn",
-            "-ac", "1",  # mono
-            "-ar", str(sample_rate),
-            "-f", "wav",
+            "-ac",
+            "1",  # mono
+            "-ar",
+            str(sample_rate),
+            "-f",
+            "wav",
             tmp.name,
         ]
         subprocess.run(cmd, capture_output=True, check=True)
@@ -152,15 +160,24 @@ def process_clip(
     cmd = [
         "ffmpeg",
         "-y",
-        "-i", str(video_path),  # Video input
-        "-ss", str(max(0, offset_seconds)),  # Seek in mixed audio
-        "-t", str(video_duration),  # Duration to extract
-        "-i", str(mixed_audio_path),  # Audio input
-        "-map", "0:v",  # Video from first input
-        "-map", "1:a",  # Audio from second input (after seek)
-        "-c:v", "copy",  # Copy video stream (fast)
-        "-c:a", audio_codec,
-        "-b:a", audio_bitrate,
+        "-i",
+        str(video_path),  # Video input
+        "-ss",
+        str(max(0, offset_seconds)),  # Seek in mixed audio
+        "-t",
+        str(video_duration),  # Duration to extract
+        "-i",
+        str(mixed_audio_path),  # Audio input
+        "-map",
+        "0:v",  # Video from first input
+        "-map",
+        "1:a",  # Audio from second input (after seek)
+        "-c:v",
+        "copy",  # Copy video stream (fast)
+        "-c:a",
+        audio_codec,
+        "-b:a",
+        audio_bitrate,
         "-shortest",  # End when shortest stream ends
         str(output_path),
     ]

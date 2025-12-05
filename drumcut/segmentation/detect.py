@@ -207,9 +207,7 @@ def detect_song_boundaries(
             # Resample to common rate
             audio = librosa.resample(audio, orig_sr=sr, target_sr=common_sr)
 
-        energy, time_res = compute_energy_envelope(
-            audio, common_sr, hop_length, smoothing_seconds
-        )
+        energy, time_res = compute_energy_envelope(audio, common_sr, hop_length, smoothing_seconds)
         envelopes.append(energy)
 
         if common_length is None:

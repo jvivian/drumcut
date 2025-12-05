@@ -108,10 +108,14 @@ def extract_segment_from_clip(
     cmd = [
         "ffmpeg",
         "-y",
-        "-ss", str(start_seconds),
-        "-i", str(clip_path),
-        "-t", str(duration),
-        "-c", "copy",  # Stream copy for speed
+        "-ss",
+        str(start_seconds),
+        "-i",
+        str(clip_path),
+        "-t",
+        str(duration),
+        "-c",
+        "copy",  # Stream copy for speed
         str(output_path),
     ]
 
@@ -149,10 +153,14 @@ def concat_clips(
         cmd = [
             "ffmpeg",
             "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", concat_file,
-            "-c", "copy",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            concat_file,
+            "-c",
+            "copy",
             str(output_path),
         ]
         subprocess.run(cmd, capture_output=not verbose, check=True)
