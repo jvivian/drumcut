@@ -76,51 +76,48 @@ def process(
     output: Annotated[Path, typer.Option("--output", "-o", help="Output directory")] = Path(
         "./processed"
     ),
-    filter_preset: Annotated[
-        str, typer.Option("--filter", "-f", help="Video filter preset")
-    ] = "death-metal",
-    min_duration: Annotated[int, typer.Option(help="Minimum song duration in seconds")] = 30,
-    padding: Annotated[float, typer.Option(help="Padding around segments in seconds")] = 3.0,
+    min_song_duration: Annotated[
+        int, typer.Option(help="Minimum song duration in seconds (2+ min default)")
+    ] = 120,
+    min_misc_duration: Annotated[
+        int, typer.Option(help="Minimum misc clip duration in seconds")
+    ] = 30,
+    buffer: Annotated[float, typer.Option(help="Buffer around songs in seconds")] = 10.0,
+    min_silence: Annotated[
+        float, typer.Option(help="Minimum silence for song boundary in seconds")
+    ] = 3.0,
     session_id: Annotated[
         int | None, typer.Option(help="Specific GoPro session ID to process")
     ] = None,
-    skip_merge: Annotated[bool, typer.Option(help="Skip video merge (use existing)")] = False,
     skip_mix: Annotated[bool, typer.Option(help="Skip audio mix (use existing)")] = False,
-    skip_sync: Annotated[bool, typer.Option(help="Skip audio-video sync")] = False,
-    skip_segment: Annotated[bool, typer.Option(help="Skip segmentation")] = False,
-    skip_group: Annotated[bool, typer.Option(help="Skip grouping")] = False,
+    skip_clips: Annotated[bool, typer.Option(help="Skip clip processing (use existing)")] = False,
     keep_intermediates: Annotated[bool, typer.Option(help="Keep intermediate files")] = False,
     dry_run: Annotated[bool, typer.Option(help="Preview operations without executing")] = False,
 ) -> None:
     """Run the full preprocessing pipeline on a session folder.
 
-    Pipeline steps:
-    1. Merge GoPro chapters into single video
-    2. Mix audio tracks (L, R, MIDI) to stereo
-    3. Sync mixed audio to video
-    4. Segment video by song boundaries
-    5. Group similar segments (optional)
+    New memory-efficient pipeline:
+    1. Mix audio tracks (L, R, MIDI) to stereo
+    2. Detect song boundaries (silence across ALL tracks)
+    3. Process each clip individually (align + replace audio)
+    4. Export songs (2+ min) and misc clips (30s-2min)
     """
     import shutil
-    import subprocess
-    import tempfile
 
-    from drumcut.audio.io import detect_track_roles, load_audio
+    import librosa
+
+    from drumcut.audio.io import detect_track_roles
     from drumcut.audio.mix import mix_session_ffmpeg
-    from drumcut.grouping.cluster import cluster_segments, organize_output
-    from drumcut.grouping.similarity import compute_distance_matrix
-    from drumcut.segmentation.detect import detect_activity_regions
-    from drumcut.segmentation.slice import extract_segments
+    from drumcut.export import export_songs
+    from drumcut.segmentation.detect import detect_song_boundaries, segments_from_boundaries
     from drumcut.ui import PipelineUI
+    from drumcut.video.clip import process_session_clips
     from drumcut.video.gopro import find_gopro_files, group_by_session
-    from drumcut.video.merge import merge_chapters
-    from drumcut.video.sync import sync_audio_to_video
 
     # Create output directories
     output = Path(output)
     intermediates_dir = output / "intermediates"
-    segments_dir = output / "segments"
-    grouped_dir = output / "grouped"
+    clips_dir = intermediates_dir / "clips"
 
     # Pre-flight: Find GoPro files and validate
     gopro_files = find_gopro_files(session_folder)
@@ -145,124 +142,106 @@ def process(
         console.print(f"  GoPro:   Session {session_id} ({len(selected_files)} chapters)")
         console.print(f"  Audio:   {list(roles.keys()) if roles else 'None found'}")
         console.print()
-        console.print("  [dim]1.[/] Merge Video    → Would merge chapters")
-        console.print("  [dim]2.[/] Mix Audio      → Would mix tracks")
-        console.print("  [dim]3.[/] Sync A/V       → Would sync audio")
-        console.print("  [dim]4.[/] Segment        → Would detect songs")
-        console.print("  [dim]5.[/] Group          → Would cluster similar")
+        console.print("  [dim]1.[/] Mix Audio      → Mix tracks to stereo")
+        console.print("  [dim]2.[/] Song Boundaries → Detect silence across all tracks")
+        console.print("  [dim]3.[/] Process Clips  → Align + replace audio per clip")
+        console.print("  [dim]4.[/] Export Songs   → songs/ (2+ min) and misc/ (30s-2min)")
         console.print()
         return
+
+    if not roles:
+        console.print("[red]No audio files found[/]")
+        raise typer.Exit(1)
 
     # Create directories
     output.mkdir(parents=True, exist_ok=True)
     intermediates_dir.mkdir(exist_ok=True)
+    clips_dir.mkdir(exist_ok=True)
 
-    merged_video = intermediates_dir / "merged.mp4"
     mixed_audio = intermediates_dir / "mixed.wav"
-    synced_video = intermediates_dir / "synced.mp4"
 
     # Create UI
     ui = PipelineUI(title="🥁 drumcut Pipeline")
-    ui.add_step("Merge Video", f"Merge {len(selected_files)} GoPro chapters")
-    ui.add_step("Mix Audio", f"Mix {len(roles)} audio tracks" if roles else "No audio")
-    ui.add_step("Sync A/V", "Sync audio to video")
-    ui.add_step("Segment", "Detect song boundaries")
-    ui.add_step("Group", "Cluster similar segments")
-
-    segments = []
-    segment_paths = []
+    ui.add_step("Mix Audio", f"Mix {len(roles)} audio tracks")
+    ui.add_step("Song Boundaries", "Detect silence across all tracks")
+    ui.add_step("Process Clips", f"Process {len(selected_files)} clips")
+    ui.add_step("Export Songs", "Export songs/ and misc/")
 
     with ui:
-        # Step 1: Merge video
-        if skip_merge and merged_video.exists():
+        # Step 1: Mix audio
+        if skip_mix and mixed_audio.exists():
             ui.skip_step(0, "Using existing")
         else:
-            ui.start_step(0, f"Merging {len(selected_files)} chapters...")
-            merge_chapters(selected_files, merged_video, overlap_trim="auto", verbose=False)
-            size_gb = merged_video.stat().st_size / 1024 / 1024 / 1024
-            ui.complete_step(0, f"{size_gb:.1f} GB")
-
-        # Step 2: Mix audio
-        if not roles:
-            ui.skip_step(1, "No audio files")
-            skip_mix = True
-            skip_sync = True
-        elif skip_mix and mixed_audio.exists():
-            ui.skip_step(1, "Using existing")
-        else:
-            ui.start_step(1, f"Mixing {len(roles)} tracks...")
+            ui.start_step(0, f"Mixing {len(roles)} tracks...")
             mix_session_ffmpeg(session_folder, mixed_audio, verbose=False)
-            ui.complete_step(1, f"{', '.join(roles.keys())}")
+            ui.complete_step(0, f"{', '.join(roles.keys())}")
 
-        # Step 3: Sync audio to video
-        if skip_sync or skip_mix:
-            ui.skip_step(2, "Skipped")
-            synced_video = merged_video
-        else:
-            ui.start_step(2, "Finding sync offset...")
-            result = sync_audio_to_video(merged_video, mixed_audio, synced_video)
-            offset_ms = result["offset_seconds"] * 1000
-            ui.complete_step(2, f"Offset: {offset_ms:+.0f}ms")
+        # Step 2: Detect song boundaries using ALL tracks
+        ui.start_step(1, "Analyzing all tracks for silence...")
+        track_paths = list(roles.values())
+        boundaries = detect_song_boundaries(
+            track_paths,
+            min_silence_duration=min_silence,
+        )
 
-        # Step 4: Segment
-        midi_track = roles.get("midi") if roles else None
-        if skip_segment:
-            ui.skip_step(3, "Skipped")
-        elif midi_track is None:
-            ui.skip_step(3, "No MIDI track")
-        else:
-            ui.start_step(3, "Analyzing energy...")
-            audio, sr = load_audio(midi_track)
-            segments = detect_activity_regions(
-                audio, sr, min_duration=min_duration, padding=padding
-            )
-            ui.update_step(f"Extracting {len(segments)} segments...")
+        # Get total duration from mixed audio
+        mixed_duration = librosa.get_duration(path=str(mixed_audio))
 
-            if segments:
-                segment_paths = extract_segments(synced_video, segments, segments_dir)
-                ui.complete_step(3, f"{len(segments)} segments")
-            else:
-                ui.complete_step(3, "No segments found")
+        # Convert boundaries to segments
+        segments = segments_from_boundaries(
+            boundaries,
+            total_duration=mixed_duration,
+            min_duration=min_misc_duration,
+            buffer_seconds=buffer,
+        )
+        ui.complete_step(1, f"{len(boundaries)} boundaries, {len(segments)} segments")
 
-        # Step 5: Group
-        if skip_group or not segment_paths:
-            ui.skip_step(4, "Skipped")
-        elif len(segment_paths) < 2:
-            ui.skip_step(4, "Need ≥2 segments")
-        else:
-            ui.start_step(4, "Extracting audio...")
-            segment_files = sorted(segments_dir.glob("*.mp4"))
+        # Step 3: Process each clip individually
+        video_paths = [f.path for f in selected_files]
+        if skip_clips and clips_dir.exists() and any(clips_dir.iterdir()):
+            ui.skip_step(2, "Using existing")
+            # Load existing clip infos (simplified - just get the processed files)
+            from drumcut.video.clip import ClipInfo
 
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmpdir = Path(tmpdir)
-                audio_paths = []
-
-                for seg_path in segment_files:
-                    audio_path = tmpdir / f"{seg_path.stem}.wav"
-                    subprocess.run(
-                        [
-                            "ffmpeg",
-                            "-y",
-                            "-i",
-                            str(seg_path),
-                            "-vn",
-                            "-ac",
-                            "1",
-                            "-ar",
-                            "22050",
-                            str(audio_path),
-                        ],
-                        capture_output=True,
+            processed_files = sorted(clips_dir.glob("processed_*.mp4"))
+            clip_infos = []
+            cumulative_offset = 0.0
+            for pf in processed_files:
+                duration = librosa.get_duration(path=str(pf))
+                clip_infos.append(
+                    ClipInfo(
+                        path=pf,
+                        offset_seconds=cumulative_offset,
+                        duration_seconds=duration,
+                        correlation_strength=1.0,
                     )
-                    audio_paths.append(audio_path)
+                )
+                cumulative_offset += duration
+        else:
+            ui.start_step(2, f"Processing {len(video_paths)} clips...")
+            clip_infos = process_session_clips(
+                video_paths,
+                mixed_audio,
+                clips_dir,
+                alignment_window=30.0,
+                verbose=False,
+            )
+            ui.complete_step(2, f"{len(clip_infos)} clips processed")
 
-                ui.update_step("Computing similarity...")
-                distances = compute_distance_matrix(audio_paths)
-                groups = cluster_segments(distances)
+        # Step 4: Export songs
+        ui.start_step(3, "Exporting songs and misc clips...")
+        exports = export_songs(
+            segments,
+            clip_infos,
+            output,
+            min_song_duration=float(min_song_duration),
+            min_misc_duration=float(min_misc_duration),
+            verbose=False,
+        )
 
-                ui.update_step("Organizing output...")
-                organize_output(segment_files, groups, grouped_dir)
-                ui.complete_step(4, f"{len(groups)} groups")
+        songs = [e for e in exports if e.category == "songs"]
+        misc = [e for e in exports if e.category == "misc"]
+        ui.complete_step(3, f"{len(songs)} songs, {len(misc)} misc")
 
     # Cleanup intermediates
     if not keep_intermediates and intermediates_dir.exists():
@@ -272,10 +251,8 @@ def process(
     console.print()
     console.print("[bold green]✓ Pipeline complete![/]")
     console.print(f"  Output: {output}")
-    if segments:
-        console.print(f"  Segments: {len(segments)}")
-    if segment_paths and not skip_group:
-        console.print(f"  Groups: {grouped_dir}")
+    console.print(f"  Songs: {len(songs)} (in songs/)")
+    console.print(f"  Misc:  {len(misc)} (in misc/)")
 
 
 @app.command()
