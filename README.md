@@ -8,9 +8,16 @@ A Python CLI tool for automating drum practice video preprocessing. Takes raw Go
 
 `drumcut` automates the entire preprocessing pipeline, delivering a folder of video clips categorized by duration and optionally grouped by song similarity, ready for drag-and-drop into your editor.
 
-<p align="center">
-  <img src="docs/imgs/drumcut-demo.gif" alt="drumcut pipeline demo" width="600"/>
-</p>
+<table>
+  <tr>
+    <td><img src="docs/imgs/drumcut-1.png" alt="Mix Audio" width="400"/></td>
+    <td><img src="docs/imgs/drumcut-2.png" alt="Song Boundaries" width="400"/></td>
+  </tr>
+  <tr>
+    <td><img src="docs/imgs/drumcut-3.png" alt="Process Clips" width="400"/></td>
+    <td><img src="docs/imgs/drumcut-4.png" alt="Export Songs" width="400"/></td>
+  </tr>
+</table>
 
 ## Features
 
