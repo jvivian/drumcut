@@ -289,7 +289,7 @@ def process(
             if category == "songs":
                 song_count += 1
                 output_path = songs_dir / f"song_{song_count:03d}.mp4"
-                ui.add_substep(f"Song {song_count}: {segment.duration_seconds/60:.1f} min")
+                ui.add_substep(f"Song {song_count}: {segment.duration_seconds / 60:.1f} min")
             else:
                 misc_count += 1
                 output_path = misc_dir / f"misc_{misc_count:03d}.mp4"
@@ -311,13 +311,15 @@ def process(
                 clip, start, end = clip_mappings[0]
                 extract_segment_from_clip(clip.path, output_path, start, end)
 
-            exports.append(SongExport(
-                path=output_path,
-                duration_seconds=segment.duration_seconds,
-                category=category,
-                source_clips=[m[0].path.name for m in clip_mappings],
-                spans_clips=spans_clips,
-            ))
+            exports.append(
+                SongExport(
+                    path=output_path,
+                    duration_seconds=segment.duration_seconds,
+                    category=category,
+                    source_clips=[m[0].path.name for m in clip_mappings],
+                    spans_clips=spans_clips,
+                )
+            )
             ui.advance_progress()
 
         ui.complete_progress()
@@ -347,8 +349,15 @@ def process(
                     ui.add_substep(f"Extracting {song.path.name}...")
                     subprocess.run(
                         [
-                            "ffmpeg", "-y", "-i", str(song.path),
-                            "-vn", "-ac", "1", "-ar", "22050",
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            str(song.path),
+                            "-vn",
+                            "-ac",
+                            "1",
+                            "-ar",
+                            "22050",
                             str(audio_path),
                         ],
                         capture_output=True,

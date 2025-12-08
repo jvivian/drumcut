@@ -35,11 +35,16 @@ def _extract_audio_clip(
         cmd = [
             "ffmpeg",
             "-y",
-            "-t", str(duration),
-            "-i", str(audio_path),
-            "-ac", "1",  # mono
-            "-ar", str(sample_rate),
-            "-f", "wav",
+            "-t",
+            str(duration),
+            "-i",
+            str(audio_path),
+            "-ac",
+            "1",  # mono
+            "-ar",
+            str(sample_rate),
+            "-f",
+            "wav",
             tmp.name,
         ]
         subprocess.run(cmd, capture_output=True, check=True)
