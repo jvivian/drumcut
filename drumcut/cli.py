@@ -91,6 +91,9 @@ def process(
     ] = None,
     skip_mix: Annotated[bool, typer.Option(help="Skip audio mix (use existing)")] = False,
     skip_clips: Annotated[bool, typer.Option(help="Skip clip processing (use existing)")] = False,
+    group_similar: Annotated[
+        bool, typer.Option(help="Group similar songs by audio fingerprint")
+    ] = False,
     keep_intermediates: Annotated[bool, typer.Option(help="Keep intermediate files")] = False,
     dry_run: Annotated[bool, typer.Option(help="Preview operations without executing")] = False,
 ) -> None:
@@ -108,10 +111,8 @@ def process(
 
     from drumcut.audio.io import detect_track_roles
     from drumcut.audio.mix import mix_session_ffmpeg
-    from drumcut.export import export_songs
     from drumcut.segmentation.detect import detect_song_boundaries, segments_from_boundaries
     from drumcut.ui import PipelineUI
-    from drumcut.video.clip import process_session_clips
     from drumcut.video.gopro import find_gopro_files, group_by_session
 
     # Create output directories
@@ -146,6 +147,8 @@ def process(
         console.print("  [dim]2.[/] Song Boundaries → Detect silence across all tracks")
         console.print("  [dim]3.[/] Process Clips  → Align + replace audio per clip")
         console.print("  [dim]4.[/] Export Songs   → songs/ (2+ min) and misc/ (30s-2min)")
+        if group_similar:
+            console.print("  [dim]5.[/] Group Similar  → Cluster by audio fingerprint")
         console.print()
         return
 
@@ -166,6 +169,8 @@ def process(
     ui.add_step("Song Boundaries", "Detect silence across all tracks")
     ui.add_step("Process Clips", f"Process {len(selected_files)} clips")
     ui.add_step("Export Songs", "Export songs/ and misc/")
+    if group_similar:
+        ui.add_step("Group Similar", "Cluster by audio fingerprint")
 
     with ui:
         # Step 1: Mix audio
@@ -173,16 +178,26 @@ def process(
             ui.skip_step(0, "Using existing")
         else:
             ui.start_step(0, f"Mixing {len(roles)} tracks...")
+            ui.add_substep("Aligning tracks...")
             mix_session_ffmpeg(session_folder, mixed_audio, verbose=False)
+            ui.add_substep("Normalizing to -14 LUFS...")
             ui.complete_step(0, f"{', '.join(roles.keys())}")
 
         # Step 2: Detect song boundaries using ALL tracks
-        ui.start_step(1, "Analyzing all tracks for silence...")
+        ui.start_step(1, "Analyzing tracks for silence...")
         track_paths = list(roles.values())
+
+        # Show progress per track
+        ui.start_progress("Analyzing tracks", total=len(track_paths))
+        for role in roles:
+            ui.add_substep(f"Analyzing {role} track...")
+            ui.advance_progress()
+
         boundaries = detect_song_boundaries(
             track_paths,
             min_silence_duration=min_silence,
         )
+        ui.complete_progress()
 
         # Get total duration from mixed audio
         mixed_duration = librosa.get_duration(path=str(mixed_audio))
@@ -194,15 +209,14 @@ def process(
             min_duration=min_misc_duration,
             buffer_seconds=buffer,
         )
-        ui.complete_step(1, f"{len(boundaries)} boundaries, {len(segments)} segments")
+        ui.complete_step(1, f"{len(boundaries)} boundaries → {len(segments)} segments")
 
         # Step 3: Process each clip individually
+        from drumcut.video.clip import ClipInfo, process_clip
+
         video_paths = [f.path for f in selected_files]
         if skip_clips and clips_dir.exists() and any(clips_dir.iterdir()):
             ui.skip_step(2, "Using existing")
-            # Load existing clip infos (simplified - just get the processed files)
-            from drumcut.video.clip import ClipInfo
-
             processed_files = sorted(clips_dir.glob("processed_*.mp4"))
             clip_infos = []
             cumulative_offset = 0.0
@@ -219,29 +233,154 @@ def process(
                 cumulative_offset += duration
         else:
             ui.start_step(2, f"Processing {len(video_paths)} clips...")
-            clip_infos = process_session_clips(
-                video_paths,
-                mixed_audio,
-                clips_dir,
-                alignment_window=30.0,
-                verbose=False,
-            )
+            ui.start_progress("Processing clips", total=len(video_paths))
+
+            clip_infos = []
+            for i, video_path in enumerate(video_paths, 1):
+                ui.add_substep(f"Clip {i}/{len(video_paths)}: {video_path.name}")
+                output_path = clips_dir / f"processed_{video_path.name}"
+
+                clip_info = process_clip(
+                    video_path=video_path,
+                    mixed_audio_path=mixed_audio,
+                    output_path=output_path,
+                    alignment_window=30.0,
+                    verbose=False,
+                )
+                clip_infos.append(clip_info)
+                ui.advance_progress()
+
+            ui.complete_progress()
             ui.complete_step(2, f"{len(clip_infos)} clips processed")
 
         # Step 4: Export songs
-        ui.start_step(3, "Exporting songs and misc clips...")
-        exports = export_songs(
-            segments,
-            clip_infos,
-            output,
-            min_song_duration=float(min_song_duration),
-            min_misc_duration=float(min_misc_duration),
-            verbose=False,
+        from drumcut.export import (
+            SongExport,
+            categorize_segment,
+            concat_clips,
+            extract_segment_from_clip,
+            map_segment_to_clips,
         )
 
+        ui.start_step(3, "Exporting songs...")
+
+        songs_dir = output / "songs"
+        misc_dir = output / "misc"
+        songs_dir.mkdir(parents=True, exist_ok=True)
+        misc_dir.mkdir(parents=True, exist_ok=True)
+
+        # Filter valid segments
+        valid_segments = [s for s in segments if s.duration_seconds >= min_misc_duration]
+        ui.start_progress("Exporting", total=len(valid_segments))
+
+        exports = []
+        song_count = 0
+        misc_count = 0
+
+        for segment in valid_segments:
+            clip_mappings = map_segment_to_clips(segment, clip_infos)
+            if not clip_mappings:
+                ui.advance_progress()
+                continue
+
+            category = categorize_segment(segment, float(min_song_duration))
+            spans_clips = len(clip_mappings) > 1
+
+            if category == "songs":
+                song_count += 1
+                output_path = songs_dir / f"song_{song_count:03d}.mp4"
+                ui.add_substep(f"Song {song_count}: {segment.duration_seconds/60:.1f} min")
+            else:
+                misc_count += 1
+                output_path = misc_dir / f"misc_{misc_count:03d}.mp4"
+                ui.add_substep(f"Misc {misc_count}: {segment.duration_seconds:.0f}s")
+
+            if spans_clips:
+                temp_clips = []
+                temp_dir = output / "temp"
+                temp_dir.mkdir(exist_ok=True)
+                for j, (clip, start, end) in enumerate(clip_mappings):
+                    temp_path = temp_dir / f"part_{j:03d}.mp4"
+                    extract_segment_from_clip(clip.path, temp_path, start, end)
+                    temp_clips.append(temp_path)
+                concat_clips(temp_clips, output_path)
+                for tp in temp_clips:
+                    tp.unlink(missing_ok=True)
+                temp_dir.rmdir()
+            else:
+                clip, start, end = clip_mappings[0]
+                extract_segment_from_clip(clip.path, output_path, start, end)
+
+            exports.append(SongExport(
+                path=output_path,
+                duration_seconds=segment.duration_seconds,
+                category=category,
+                source_clips=[m[0].path.name for m in clip_mappings],
+                spans_clips=spans_clips,
+            ))
+            ui.advance_progress()
+
+        ui.complete_progress()
         songs = [e for e in exports if e.category == "songs"]
         misc = [e for e in exports if e.category == "misc"]
         ui.complete_step(3, f"{len(songs)} songs, {len(misc)} misc")
+
+        # Step 5: Group similar songs (optional)
+        groups = {}
+        if group_similar and len(songs) >= 2:
+            import subprocess
+            import tempfile
+
+            from drumcut.grouping.cluster import cluster_segments
+            from drumcut.grouping.similarity import compute_distance_matrix
+
+            ui.start_step(4, "Extracting audio fingerprints...")
+
+            # Extract audio from each song for fingerprinting
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir = Path(tmpdir)
+                audio_paths = []
+
+                ui.start_progress("Extracting audio", total=len(songs))
+                for song in songs:
+                    audio_path = tmpdir / f"{song.path.stem}.wav"
+                    ui.add_substep(f"Extracting {song.path.name}...")
+                    subprocess.run(
+                        [
+                            "ffmpeg", "-y", "-i", str(song.path),
+                            "-vn", "-ac", "1", "-ar", "22050",
+                            str(audio_path),
+                        ],
+                        capture_output=True,
+                    )
+                    audio_paths.append(audio_path)
+                    ui.advance_progress()
+                ui.complete_progress()
+
+                # Compute similarity matrix
+                ui.add_substep("Computing audio similarity...")
+                ui.start_progress("Computing DTW distances", total=None)
+                distances = compute_distance_matrix(audio_paths)
+                ui.complete_progress()
+
+                # Cluster
+                ui.add_substep("Clustering similar songs...")
+                groups = cluster_segments(distances)
+
+            # Organize into group folders
+            ui.add_substep(f"Organizing into {len(groups)} groups...")
+            for label, indices in groups.items():
+                group_dir = songs_dir / label
+                group_dir.mkdir(exist_ok=True)
+                for idx in indices:
+                    song = songs[idx]
+                    new_path = group_dir / song.path.name
+                    song.path.rename(new_path)
+                    song.path = new_path
+
+            ui.complete_step(4, f"{len(groups)} groups")
+        elif group_similar:
+            ui.skip_step(4, "Need ≥2 songs")
 
     # Cleanup intermediates
     if not keep_intermediates and intermediates_dir.exists():
@@ -251,8 +390,37 @@ def process(
     console.print()
     console.print("[bold green]✓ Pipeline complete![/]")
     console.print(f"  Output: {output}")
-    console.print(f"  Songs: {len(songs)} (in songs/)")
-    console.print(f"  Misc:  {len(misc)} (in misc/)")
+    console.print()
+
+    # Songs summary
+    if songs:
+        if groups:
+            console.print(f"  [bold]Songs[/] ({len(songs)} in {len(groups)} groups):")
+            for label, indices in sorted(groups.items()):
+                console.print(f"    [bold cyan]Group {label}[/] ({len(indices)} songs):")
+                for idx in indices:
+                    s = songs[idx]
+                    duration_min = s.duration_seconds / 60
+                    if s.spans_clips:
+                        clips_str = f"[yellow]spans {len(s.source_clips)} clips[/]"
+                    else:
+                        clips_str = f"[dim]{s.source_clips[0]}[/]"
+                    console.print(f"      {s.path.name}: {duration_min:.1f} min ({clips_str})")
+        else:
+            console.print(f"  [bold]Songs[/] ({len(songs)} in songs/):")
+            for s in songs:
+                duration_min = s.duration_seconds / 60
+                if s.spans_clips:
+                    clips_str = f"[yellow]spans {len(s.source_clips)} clips[/]"
+                else:
+                    clips_str = f"[dim]{s.source_clips[0]}[/]"
+                console.print(f"    {s.path.name}: {duration_min:.1f} min ({clips_str})")
+
+    # Misc summary
+    if misc:
+        console.print(f"  [bold]Misc[/] ({len(misc)} in misc/):")
+        for m in misc:
+            console.print(f"    {m.path.name}: {m.duration_seconds:.0f}s")
 
 
 @app.command()
