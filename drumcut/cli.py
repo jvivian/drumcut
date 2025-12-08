@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.prompt import IntPrompt
 from rich.table import Table
 
@@ -751,6 +751,195 @@ def group(
         organize_output(segment_paths, groups, output)
 
         console.print(f"[green]Created {len(groups)} group folder(s)[/]")
+
+
+@app.command()
+def analyze_similarity(
+    songs_dir: Annotated[Path, typer.Argument(help="Directory containing song videos")],
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output CSV path")] = Path(
+        "./similarity.csv"
+    ),
+) -> None:
+    """Analyze pairwise similarity between songs and output CSV for labeling.
+
+    Creates a CSV with song pairs and various similarity metrics:
+    - DTW distance (chroma-based)
+    - Duration of each song
+    - Tempo (BPM) of each song
+    - Empty 'same_song' column for manual labeling
+
+    Use this to build training data for improving the grouping heuristic.
+    """
+    import csv
+    import subprocess
+    import tempfile
+
+    import librosa
+    import numpy as np
+
+    from drumcut.grouping.features import extract_chroma, extract_tempo
+    from drumcut.grouping.similarity import dtw_distance
+
+    # Find all video files
+    video_extensions = [".mp4", ".MP4", ".mov", ".MOV", ".avi", ".AVI"]
+    song_paths = []
+    for ext in video_extensions:
+        song_paths.extend(songs_dir.glob(f"*{ext}"))
+
+    song_paths = sorted(song_paths)
+
+    if len(song_paths) < 2:
+        console.print("[yellow]Need at least 2 songs to analyze similarity[/]")
+        raise typer.Exit(0)
+
+    console.print(f"[bold blue]Analyzing {len(song_paths)} songs...[/]")
+
+    # Extract audio and compute features
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Step 1: Extract audio from all videos
+        console.print("[dim]Extracting audio...[/]")
+        audio_paths = []
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Extracting", total=len(song_paths))
+            for song_path in song_paths:
+                audio_path = tmpdir / f"{song_path.stem}.wav"
+                cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(song_path),
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "22050",
+                    str(audio_path),
+                ]
+                subprocess.run(cmd, capture_output=True)
+                audio_paths.append(audio_path)
+                progress.advance(task)
+
+        # Step 2: Extract features for each song
+        console.print("[dim]Extracting features...[/]")
+        features = []
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Features", total=len(audio_paths))
+            for i, audio_path in enumerate(audio_paths):
+                # Duration
+                duration = librosa.get_duration(path=str(audio_path))
+
+                # Tempo
+                try:
+                    tempo = extract_tempo(audio_path)
+                except Exception:
+                    tempo = 0.0
+
+                # Chroma (handle NaN values)
+                chroma = extract_chroma(audio_path)
+                # Replace NaN with zeros to avoid DTW errors
+                chroma = np.nan_to_num(chroma, nan=0.0)
+
+                features.append(
+                    {
+                        "name": song_paths[i].name,
+                        "path": song_paths[i],
+                        "duration": duration,
+                        "tempo": tempo,
+                        "chroma": chroma,
+                    }
+                )
+                progress.advance(task)
+
+        # Step 3: Compute pairwise similarities
+        console.print("[dim]Computing pairwise DTW distances...[/]")
+        n = len(features)
+        total_pairs = n * (n - 1) // 2
+
+        rows = []
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Computing", total=total_pairs)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    f1, f2 = features[i], features[j]
+
+                    # DTW distance (with error handling)
+                    try:
+                        dtw_dist = dtw_distance(f1["chroma"], f2["chroma"])
+                    except Exception:
+                        dtw_dist = float("inf")  # Mark as very dissimilar if DTW fails
+
+                    # Duration metrics
+                    dur_diff = abs(f1["duration"] - f2["duration"])
+                    dur_ratio = min(f1["duration"], f2["duration"]) / max(
+                        f1["duration"], f2["duration"]
+                    )
+
+                    # Tempo metrics
+                    tempo_diff = abs(f1["tempo"] - f2["tempo"])
+                    tempo_ratio = (
+                        min(f1["tempo"], f2["tempo"]) / max(f1["tempo"], f2["tempo"])
+                        if f1["tempo"] > 0 and f2["tempo"] > 0
+                        else 0.0
+                    )
+
+                    rows.append(
+                        {
+                            "song_a": f1["name"],
+                            "song_b": f2["name"],
+                            "duration_a": round(f1["duration"], 1),
+                            "duration_b": round(f2["duration"], 1),
+                            "duration_diff": round(dur_diff, 1),
+                            "duration_ratio": round(dur_ratio, 3),
+                            "tempo_a": round(f1["tempo"], 1),
+                            "tempo_b": round(f2["tempo"], 1),
+                            "tempo_diff": round(tempo_diff, 1),
+                            "tempo_ratio": round(tempo_ratio, 3),
+                            "dtw_distance": round(dtw_dist, 4),
+                            "same_song": "",  # Empty for manual labeling
+                        }
+                    )
+                    progress.advance(task)
+
+        # Sort by DTW distance (most similar first)
+        rows.sort(key=lambda x: x["dtw_distance"])
+
+        # Write CSV
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows(rows)
+
+        console.print(f"\n[green]Wrote {len(rows)} pairs to {output}[/]")
+        console.print("[dim]Fill in 'same_song' column with 'yes' or 'no' for training data[/]")
+
+        # Show preview of most similar pairs
+        console.print("\n[bold]Top 10 most similar pairs:[/]")
+        for row in rows[:10]:
+            console.print(
+                f"  {row['dtw_distance']:.4f}  {row['song_a']} ↔ {row['song_b']}  "
+                f"[dim]({row['duration_a']}s vs {row['duration_b']}s)[/]"
+            )
 
 
 @app.command()
