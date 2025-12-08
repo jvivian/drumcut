@@ -3,14 +3,48 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from pathlib import Path
 
+import librosa
 import numpy as np
 
 from drumcut.audio.align import align_tracks
 from drumcut.audio.io import detect_track_roles, load_audio, save_audio
 from drumcut.audio.normalize import normalize_audio
 from drumcut.audio.pan import pan_mono_to_stereo
+
+
+def _extract_audio_clip(
+    audio_path: Path | str,
+    duration: float,
+    sample_rate: int,
+) -> np.ndarray:
+    """
+    Extract first N seconds of audio using ffmpeg (memory-efficient).
+
+    Args:
+        audio_path: Path to audio file.
+        duration: Duration to extract in seconds.
+        sample_rate: Output sample rate.
+
+    Returns:
+        Mono audio array.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-t", str(duration),
+            "-i", str(audio_path),
+            "-ac", "1",  # mono
+            "-ar", str(sample_rate),
+            "-f", "wav",
+            tmp.name,
+        ]
+        subprocess.run(cmd, capture_output=True, check=True)
+        audio, _ = librosa.load(tmp.name, sr=sample_rate, mono=True)
+    return audio
 
 
 def mix_tracks(
@@ -217,7 +251,6 @@ def mix_session_ffmpeg(
     Returns:
         Dict with mixing metadata.
     """
-    from drumcut.audio.io import ensure_mono
 
     session_folder = Path(session_folder)
     output_path = Path(output_path)
@@ -244,19 +277,17 @@ def mix_session_ffmpeg(
     offsets_samples = {}
 
     if "midi" in roles and len(roles) > 1:
-        # Load only first alignment_window seconds for alignment
-        alignment_samples = int(alignment_window * sr)
-
-        midi_audio, _ = load_audio(roles["midi"], sr=sr)
-        midi_clip = ensure_mono(midi_audio[:alignment_samples])
+        # Load only first alignment_window seconds for alignment using ffmpeg
+        # This avoids loading entire multi-GB files into memory
+        midi_clip = _extract_audio_clip(roles["midi"], alignment_window, sr)
 
         other_roles = [r for r in ["left", "right"] if r in roles]
 
         if other_roles:
             other_clips = []
             for role in other_roles:
-                audio, _ = load_audio(roles[role], sr=sr)
-                other_clips.append(ensure_mono(audio[:alignment_samples]))
+                clip = _extract_audio_clip(roles[role], alignment_window, sr)
+                other_clips.append(clip)
 
             _, offsets = align_tracks(midi_clip, other_clips, sr)
 
@@ -266,10 +297,9 @@ def mix_session_ffmpeg(
                 if verbose:
                     print(f"  Alignment offset for {role}: {offset / sr * 1000:.1f}ms")
 
-        # Free alignment memory
-        del midi_audio, midi_clip
-        if other_roles:
             del other_clips
+
+        del midi_clip
 
     # Build ffmpeg command for mixing
     # Convert pan values to ffmpeg pan filter format
