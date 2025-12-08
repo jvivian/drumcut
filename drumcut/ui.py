@@ -88,7 +88,7 @@ class PipelineUI:
             expand=True,
         )
         table.add_column("Icon", width=3)
-        table.add_column("Step", width=25)
+        table.add_column("Step", width=20)
         table.add_column("Status", ratio=1)
 
         for step in self.steps:
@@ -113,22 +113,57 @@ class PipelineUI:
 
             table.add_row(icon, name, status)
 
-            # Show substeps for running step
-            if step.status == StepStatus.RUNNING and step.substeps:
-                for substep in step.substeps[-3:]:  # Show last 3 substeps
-                    table.add_row("", "  [dim]└─[/]", f"[dim]{substep}[/]")
+        return table
+
+    def _render_substeps(self) -> Table | None:
+        """Render substeps for the current running step."""
+        if self.current_step_idx < 0 or self.current_step_idx >= len(self.steps):
+            return None
+
+        step = self.steps[self.current_step_idx]
+        if step.status != StepStatus.RUNNING or not step.substeps:
+            return None
+
+        table = Table(
+            show_header=False,
+            box=None,
+            padding=(0, 1),
+            expand=True,
+        )
+        table.add_column("Icon", width=3)
+        table.add_column("Substep", ratio=1)
+
+        # Show recent substeps with checkmarks for completed ones
+        for i, substep in enumerate(step.substeps):
+            is_last = i == len(step.substeps) - 1
+            if is_last:
+                # Current substep - spinner style
+                table.add_row("[cyan]›[/]", f"[cyan]{substep}[/]")
+            else:
+                # Completed substep
+                table.add_row("[green]✓[/]", f"[dim]{substep}[/]")
 
         return table
 
     def _render(self) -> Panel:
         """Render the full UI."""
         steps_table = self._render_steps()
+        substeps_table = self._render_substeps()
 
-        # Combine with progress if active
+        # Build content with optional sections
+        parts = [steps_table]
+
+        # Add separator and substeps if present
+        if substeps_table is not None or self.current_task is not None:
+            parts.append("[dim]─" * 50 + "[/]")
+
+        if substeps_table is not None:
+            parts.append(substeps_table)
+
         if self.current_task is not None:
-            content = Group(steps_table, "", self.progress)
-        else:
-            content = steps_table
+            parts.append(self.progress)
+
+        content = Group(*parts)
 
         return Panel(
             content,
