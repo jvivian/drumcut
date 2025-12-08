@@ -166,6 +166,7 @@ def detect_song_boundaries(
     hop_length: int = 512,
     smoothing_seconds: float = 0.5,
     threshold_factor: float = 1.0,
+    analysis_sr: int = 8000,
 ) -> list[SongBoundary]:
     """
     Detect song boundaries by finding silence across ALL audio tracks.
@@ -180,6 +181,7 @@ def detect_song_boundaries(
         hop_length: Hop length for energy computation.
         smoothing_seconds: Smoothing window for energy envelope.
         threshold_factor: Multiplier for adaptive threshold (lower = more sensitive).
+        analysis_sr: Sample rate for analysis (lower = faster). Default 8kHz.
 
     Returns:
         List of SongBoundary objects sorted by timestamp.
@@ -193,21 +195,16 @@ def detect_song_boundaries(
     if not paths:
         return []
 
-    # Load all tracks and compute energy envelopes
+    # Load all tracks at low sample rate for fast energy analysis
+    # 8kHz is sufficient for detecting silence/activity patterns
     envelopes = []
-    common_sr = None
     common_length = None
 
     for path in paths:
-        audio, sr = librosa.load(path, sr=None, mono=True)
+        # Load at analysis_sr (8kHz default) - 6x faster than 48kHz
+        audio, sr = librosa.load(path, sr=analysis_sr, mono=True)
 
-        if common_sr is None:
-            common_sr = sr
-        elif sr != common_sr:
-            # Resample to common rate
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=common_sr)
-
-        energy, time_res = compute_energy_envelope(audio, common_sr, hop_length, smoothing_seconds)
+        energy, time_res = compute_energy_envelope(audio, sr, hop_length, smoothing_seconds)
         envelopes.append(energy)
 
         if common_length is None:
@@ -217,7 +214,7 @@ def detect_song_boundaries(
 
     # Trim all envelopes to common length
     envelopes = [e[:common_length] for e in envelopes]
-    time_res = hop_length / common_sr
+    time_res = hop_length / analysis_sr
 
     # Compute per-track thresholds and binary activity masks
     activity_masks = []
